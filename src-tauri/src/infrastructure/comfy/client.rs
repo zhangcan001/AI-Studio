@@ -25,8 +25,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::net::TcpStream;
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 
 const COMFY_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 // Queue inspection and model-memory control can briefly block while ComfyUI
@@ -83,21 +82,39 @@ pub struct ComfyHttpAdapter {
 
 impl ComfyHttpAdapter {
     pub fn new(config: ComfyConnectionConfig) -> Result<Self, reqwest::Error> {
-        let client = Client::builder()
-            .no_proxy()
-            .timeout(COMFY_HTTP_TIMEOUT)
-            .build()?;
+        let mut default_headers = reqwest::header::HeaderMap::new();
+        if let Some(auth) = config
+            .auth_header
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            if let Ok(mut value) = reqwest::header::HeaderValue::from_str(auth) {
+                value.set_sensitive(true);
+                default_headers.insert(reqwest::header::AUTHORIZATION, value);
+            }
+        }
+        let mut client_builder = Client::builder()
+            .default_headers(default_headers.clone())
+            .timeout(COMFY_HTTP_TIMEOUT);
+        if !config.allow_system_proxy {
+            client_builder = client_builder.no_proxy();
+        }
+        let client = client_builder.build()?;
         // ComfyUI may close long-idle keep-alive sockets while reqwest still
         // considers them reusable. Generic media uploads remain non-replayable,
         // so a stale pooled socket can block until the full upload timeout
         // instead of being safely retried. Do not retain idle upload
         // connections; ordinary control and execution requests keep pooling.
-        let upload_client = Client::builder()
-            .no_proxy()
+        let mut upload_builder = Client::builder()
+            .default_headers(default_headers)
             .pool_max_idle_per_host(0)
             .connect_timeout(COMFY_UPLOAD_CONNECT_TIMEOUT)
-            .timeout(COMFY_HTTP_TIMEOUT)
-            .build()?;
+            .timeout(COMFY_HTTP_TIMEOUT);
+        if !config.allow_system_proxy {
+            upload_builder = upload_builder.no_proxy();
+        }
+        let upload_client = upload_builder.build()?;
 
         Ok(Self {
             client,
@@ -1209,10 +1226,40 @@ impl ComfyAdapter for ComfyHttpAdapter {
         &self,
         client_id: &str,
     ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
-        let url = self.config.websocket_url(client_id);
-        let (stream, _) = connect_async(&url)
+        use tokio_tungstenite::tungstenite::{
+            handshake::{client::generate_key, derive_accept_key},
+            protocol::Role,
+        };
+        // Reuse the HTTP client's configured proxy, TLS and sensitive auth headers.
+        let key = generate_key();
+        let url = format!("{}?clientId={}", self.config.route_url("ws"), client_id);
+        let response = self
+            .client
+            .get(url)
+            .version(reqwest::Version::HTTP_11)
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .header("Sec-WebSocket-Version", "13")
+            .header("Sec-WebSocket-Key", &key)
+            .send()
             .await
-            .map_err(|error| ComfyAdapterError::Offline(format!("connect {url}: {error}")))?;
+            .map_err(|_| ComfyAdapterError::Offline("WebSocket connection failed".into()))?;
+        if response.status() != StatusCode::SWITCHING_PROTOCOLS
+            || response
+                .headers()
+                .get("Sec-WebSocket-Accept")
+                .and_then(|v| v.to_str().ok())
+                != Some(derive_accept_key(key.as_bytes()).as_str())
+        {
+            return Err(ComfyAdapterError::Protocol(
+                "invalid WebSocket upgrade response".into(),
+            ));
+        }
+        let upgraded = response
+            .upgrade()
+            .await
+            .map_err(|_| ComfyAdapterError::Offline("WebSocket upgrade failed".into()))?;
+        let stream = WebSocketStream::from_raw_socket(upgraded, Role::Client, None).await;
         Ok(Box::new(ComfyWsEventSubscription { stream }))
     }
 }
@@ -1471,7 +1518,7 @@ fn is_safe_prompt_id(prompt_id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
-type ComfyWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type ComfyWebSocket = WebSocketStream<reqwest::Upgraded>;
 
 struct ComfyWsEventSubscription {
     stream: ComfyWebSocket,
@@ -3351,5 +3398,54 @@ mod pr_e_history_tests {
             serde_json::json!({"p":{"outputs":{"1":{"images":[null]}}}})
         )
         .is_err());
+    }
+    #[tokio::test]
+    async fn websocket_uses_the_configured_proxy_http_client_and_authentication() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                socket,
+                |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
+                    assert_eq!(
+                        request.headers().get("Authorization").unwrap(),
+                        "Bearer fixture-token"
+                    );
+                    assert!(request.uri().to_string().contains("clientId=proxy-client"));
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            ws.send(Message::Text(
+                serde_json::json!({"type":"execution_start","data":{"prompt_id":"proxy-prompt"}})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        });
+        let config =
+            ComfyConnectionConfig::new("http", "unreachable.invalid", 9999).with_system_proxy(true);
+        let mut adapter = ComfyHttpAdapter::new(config).unwrap();
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_static("Bearer fixture-token"),
+        );
+        adapter.client = reqwest::Client::builder()
+            .default_headers(headers)
+            .proxy(reqwest::Proxy::all(format!("http://{proxy}")).unwrap())
+            .build()
+            .unwrap();
+        let mut events = adapter.subscribe_events("proxy-client").await.unwrap();
+        assert_eq!(
+            events.next_event().await.unwrap(),
+            Some(ComfyExecutionEvent::ExecutionStarted {
+                prompt_id: "proxy-prompt".into()
+            })
+        );
+        server.await.unwrap();
     }
 }

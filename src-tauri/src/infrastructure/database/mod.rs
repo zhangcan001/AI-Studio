@@ -6,7 +6,8 @@ mod dev033_benchmark;
 #[cfg(test)]
 mod dev048_consistency_e2e;
 
-pub use pool::initialize;
+pub use pool::{checkpoint_wal, initialize};
+pub(crate) use pool::{rebase_migration_paths, snapshot_database_file};
 pub use repositories::{
     SqliteArtifactRepository, SqliteAssetBrowseRepository, SqliteAssetDeletionRepository,
     SqliteAssetRepository, SqliteAssetVideoPromptRepository, SqliteConsistencyProfileRepository,

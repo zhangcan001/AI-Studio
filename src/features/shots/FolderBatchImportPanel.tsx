@@ -998,6 +998,40 @@ export function FolderBatchImportPanel(props: FolderBatchImportProps) {
   const survivingBatch=r?.outcome==="completed"?r.batchId:r?.residual.batchId;
   const [tab, setTab] = useState<"board" | "folder">(props.initialTab ?? "folder");
   const [boardBusy, setBoardBusy] = useState(false);
+  const [folderDragOver, setFolderDragOver] = useState(false);
+  const pickPathRef = useRef(c.pickPath);
+  pickPathRef.current = c.pickPath;
+  useEffect(() => {
+    if (tab !== "folder" || typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+      setFolderDragOver(false);
+      return;
+    }
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+    void import("@tauri-apps/api/webview")
+      .then(({ getCurrentWebview }) => getCurrentWebview().onDragDropEvent((event) => {
+        if (!alive) return;
+        const payload = event.payload;
+        if (payload.type === "over" || payload.type === "enter") {
+          setFolderDragOver(true);
+        } else if (payload.type === "leave") {
+          setFolderDragOver(false);
+        } else if (payload.type === "drop") {
+          setFolderDragOver(false);
+          const dropped = payload.paths[0];
+          if (dropped) void pickPathRef.current(dropped);
+        }
+      }))
+      .then((fn) => {
+        if (alive) unlisten = fn;
+        else fn();
+      })
+      .catch(() => { /* Outside Tauri runtime */ });
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, [tab]);
   const [receiptPage,setReceiptPage]=useState(0);useEffect(()=>setReceiptPage(0),[r,props.projectId]);
   const [rowFilter,setRowFilter]=useState<"all"|"errors"|"selected">("all");
   const [requestedPage,setPage]=useState(0);useEffect(()=>{setPage(0);setRowFilter("all");},[p?.previewVersion,p?.sessionId]);
@@ -1071,11 +1105,11 @@ export function FolderBatchImportPanel(props: FolderBatchImportProps) {
     </fieldset>
   ) : null;
 
-  return <section className="folder-import" aria-label="文件夹批量导入" aria-busy={Boolean(c.busy) || boardBusy}>
+  return <section className={`folder-import${folderDragOver ? " is-drag-over" : ""}`} aria-label="文件夹批量导入" aria-busy={Boolean(c.busy) || boardBusy}>
     <header>
       <div>
         <h2>批量导入分镜与提示词</h2>
-        <p>选中一个包含参考图与提示词的文件夹即可自动识别每镜时长、画幅、参考图并批量入队生成。</p>
+        <p>选中或直接拖入一个包含参考图与提示词的文件夹即可自动识别每镜时长、画幅、参考图并批量入队生成。</p>
       </div>
       <button type="button" onClick={props.onCancel} disabled={c.busy === "commit" || boardBusy}>关闭</button>
     </header>

@@ -153,6 +153,8 @@ pub struct OrganizationServices {
 
 pub struct SystemServices {
     pub data_dirs: AppDataDirs,
+    pub default_data_root: Arc<std::path::PathBuf>,
+    pub unsaved_draft: Arc<std::sync::atomic::AtomicBool>,
     pub comfy: Arc<ComfyService>,
     pub comfy_memory: Arc<ComfyMemoryService>,
     pub comfy_preflight: Arc<ComfyPreflightService>,

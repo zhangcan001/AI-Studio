@@ -145,6 +145,10 @@ impl DiagnosticsService {
         }
     }
 
+    pub async fn checkpoint_wal(&self) -> Result<(), AppError> {
+        self.database_health_probe.checkpoint_wal().await
+    }
+
     pub async fn summary(&self) -> DiagnosticsSummaryView {
         let database_healthy = self.database_health_probe.is_healthy().await;
 

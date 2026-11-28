@@ -450,12 +450,83 @@ export function getComfySettings(): Promise<ComfySettingsView> {
   return invoke<ComfySettingsView>("comfy_get_settings");
 }
 
-export function testComfyConnection(endpoint: string): Promise<ComfyEndpointTest> {
-  return invoke<ComfyEndpointTest>("comfy_test_connection", { endpoint });
+export function testComfyConnection(
+  endpoint: string,
+  options?: { authHeader?: string; allowSystemProxy?: boolean },
+): Promise<ComfyEndpointTest> {
+  return invoke<ComfyEndpointTest>("comfy_test_connection", {
+    endpoint,
+    ...(options?.authHeader ? { authHeader: options.authHeader } : {}),
+    ...(options?.allowSystemProxy !== undefined ? { allowSystemProxy: options.allowSystemProxy } : {}),
+  });
 }
 
-export function saveComfyEndpoint(endpoint: string): Promise<ComfySettingsView> {
-  return invoke<ComfySettingsView>("comfy_save_endpoint", { endpoint });
+export function saveComfyEndpoint(
+  endpoint: string,
+  options?: { authHeader?: string; clearAuthHeader?: boolean; allowSystemProxy?: boolean },
+): Promise<ComfySettingsView> {
+  return invoke<ComfySettingsView>("comfy_save_endpoint", {
+    endpoint,
+    ...(options?.authHeader ? { authHeader: options.authHeader } : {}),
+    ...(options?.clearAuthHeader ? { clearAuthHeader: options.clearAuthHeader } : {}),
+    ...(options?.allowSystemProxy !== undefined ? { allowSystemProxy: options.allowSystemProxy } : {}),
+  });
+}
+
+export function getDesktopPreferences(): Promise<import("../types/settings").DesktopPreferences> {
+  return invoke<import("../types/settings").DesktopPreferences>("desktop_preferences_get");
+}
+
+export function saveDesktopPreferences(
+  preferences: import("../types/settings").DesktopPreferences,
+): Promise<import("../types/settings").DesktopPreferences> {
+  return invoke<import("../types/settings").DesktopPreferences>("desktop_preferences_save", { preferences });
+}
+
+export function setAppUnsavedDraft(dirty: boolean): Promise<void> {
+  return invoke<void>("app_set_unsaved_draft", { dirty });
+}
+
+export function getStorageSummary(): Promise<import("../types/settings").StorageSummaryView> {
+  return invoke<import("../types/settings").StorageSummaryView>("storage_summary_get");
+}
+
+export function pickAndSetDataRoot(
+  migrateExisting = true,
+): Promise<import("../types/settings").DataRootMigrationView | null> {
+  return invoke<import("../types/settings").DataRootMigrationView | null>("storage_data_root_pick_and_set", {
+    migrateExisting,
+  });
+}
+
+export function resetDataRoot(): Promise<void> {
+  return invoke<void>("storage_data_root_reset");
+}
+
+export function openStorageDirectory(target: "data" | "logs" | "backups"): Promise<void> {
+  return invoke<void>("storage_open_directory", { target });
+}
+
+export function checkpointDatabaseWal(): Promise<void> {
+  return invoke<void>("storage_wal_checkpoint");
+}
+
+export function cleanupRejectedVideos(
+  projectId: string,
+): Promise<import("../types/settings").RejectedCleanupResultView> {
+  return invoke<import("../types/settings").RejectedCleanupResultView>("storage_cleanup_rejected_videos", {
+    projectId,
+  });
+}
+
+export function pickFolderImportFromPath(
+  projectId: string,
+  path: string,
+): Promise<import("../types/folderBatchImport").FolderImportPreview> {
+  return invoke<import("../types/folderBatchImport").FolderImportPreview>("folder_batch_import_pick_path", {
+    projectId,
+    path,
+  });
 }
 
 export function listComfyEnvironmentProfiles(): Promise<ComfyEnvironmentProfile[]> {
@@ -529,6 +600,16 @@ export function refreshWorkflowLibrary(): Promise<WorkflowSyncReport> {
 
 export function pickApiWorkflow(existingWorkflowId?: string): Promise<WorkflowOnboardingDraftView | null> {
   return invoke<WorkflowOnboardingDraftView | null>("workflow_onboarding_pick_api_workflow", {
+    existingWorkflowId,
+  });
+}
+
+export function importWorkflowFromPath(
+  path: string,
+  existingWorkflowId?: string,
+): Promise<WorkflowOnboardingDraftView> {
+  return invoke<WorkflowOnboardingDraftView>("workflow_onboarding_import_path", {
+    path,
     existingWorkflowId,
   });
 }

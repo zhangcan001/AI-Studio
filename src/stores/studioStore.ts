@@ -54,6 +54,10 @@ interface StudioState {
   resetDraft: () => void;
 }
 
+export function studioHasUnsavedDraft(state: Pick<StudioState, "draftDirty" | "storyboardPrompts" | "storyboardFields">): boolean {
+  return state.draftDirty || Object.keys(state.storyboardPrompts).length > 0 || Object.keys(state.storyboardFields).length > 0;
+}
+
 export const useStudioStore = create<StudioState>((set) => ({
   storyboardFields: {},
   setStoryboardField: (key,field,value)=>set(state=>{

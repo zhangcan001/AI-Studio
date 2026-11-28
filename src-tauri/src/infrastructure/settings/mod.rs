@@ -231,6 +231,7 @@ mod tests {
             schema_version: 1,
             comfy: ComfySettings {
                 endpoint: "https://lan-host:9443".to_owned(),
+                ..ComfySettings::default()
             },
             workspace_resume: WorkspaceResume::default(),
             preferred_presets: std::collections::BTreeMap::new(),
@@ -238,6 +239,7 @@ mod tests {
             production_queue_name_presets: Vec::new(),
             comfy_environment_profiles: Vec::new(),
             batch_workflow_presets: Vec::new(),
+            ..AppSettings::default()
         };
         store.save(&settings).await.unwrap();
         assert!(directory.path().join("settings.json").is_file());
@@ -253,6 +255,8 @@ mod tests {
             id: "env-1".to_owned(),
             name: "WorkFisher".to_owned(),
             endpoint: "http://127.0.0.1:8188".to_owned(),
+            auth_header: None,
+            allow_system_proxy: false,
             created_at: "2026-08-17T00:00:00Z".to_owned(),
             updated_at: "2026-08-17T00:00:00Z".to_owned(),
         };
@@ -291,6 +295,7 @@ mod tests {
             schema_version: 1,
             comfy: ComfySettings {
                 endpoint: "http://localhost:8188".to_owned(),
+                ..ComfySettings::default()
             },
             workspace_resume: WorkspaceResume::default(),
             preferred_presets: std::collections::BTreeMap::new(),
@@ -298,6 +303,7 @@ mod tests {
             production_queue_name_presets: Vec::new(),
             comfy_environment_profiles: Vec::new(),
             batch_workflow_presets: Vec::new(),
+            ..AppSettings::default()
         };
         store.save(&old).await.unwrap();
         store.save(&new).await.unwrap();

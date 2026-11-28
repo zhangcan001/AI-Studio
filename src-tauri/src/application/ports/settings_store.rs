@@ -21,6 +21,10 @@ pub struct AppSettings {
     pub comfy_environment_profiles: Vec<ComfyEnvironmentProfile>,
     #[serde(default)]
     pub batch_workflow_presets: Vec<BatchWorkflowPreset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_state: Option<WindowGeometry>,
+    #[serde(default)]
+    pub desktop_preferences: DesktopPreferences,
 }
 
 impl Default for AppSettings {
@@ -39,6 +43,47 @@ impl Default for AppSettings {
             ],
             comfy_environment_profiles: Vec::new(),
             batch_workflow_presets: Vec::new(),
+            window_state: None,
+            desktop_preferences: DesktopPreferences::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowGeometry {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    #[serde(default)]
+    pub maximized: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopPreferences {
+    #[serde(default)]
+    pub auto_free_vram_between_items: bool,
+    #[serde(default)]
+    pub transient_retry_limit: u8,
+    #[serde(default = "default_true")]
+    pub desktop_notifications: bool,
+    #[serde(default)]
+    pub onboarding_dismissed: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for DesktopPreferences {
+    fn default() -> Self {
+        Self {
+            auto_free_vram_between_items: false,
+            transient_retry_limit: 0,
+            desktop_notifications: true,
+            onboarding_dismissed: false,
         }
     }
 }
@@ -93,6 +138,10 @@ pub struct ComfyEnvironmentProfile {
     pub id: String,
     pub name: String,
     pub endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_header: Option<String>,
+    #[serde(default)]
+    pub allow_system_proxy: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -106,14 +155,21 @@ pub fn preferred_preset_key(
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ComfySettings {
     pub endpoint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_header: Option<String>,
+    #[serde(default)]
+    pub allow_system_proxy: bool,
 }
 
 impl Default for ComfySettings {
     fn default() -> Self {
         Self {
             endpoint: "http://127.0.0.1:8188".to_owned(),
+            auth_header: None,
+            allow_system_proxy: false,
         }
     }
 }

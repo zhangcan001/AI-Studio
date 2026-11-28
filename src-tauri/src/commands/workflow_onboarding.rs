@@ -20,12 +20,16 @@ pub(crate) async fn pick_api_workflow_file(
     app_handle: &AppHandle,
     files: &crate::application::workflow_file_service::WorkflowFileService,
 ) -> Result<Option<(Vec<u8>, String)>, AppError> {
-    let Some(file) = app_handle
+    use tauri::Manager;
+    let mut dialog = app_handle
         .dialog()
         .file()
-        .add_filter("ComfyUI Workflow JSON", &["json"])
-        .blocking_pick_file()
-    else {
+        .set_title("选择 ComfyUI 工作流 JSON（API 或 UI 格式）")
+        .add_filter("ComfyUI Workflow JSON", &["json"]);
+    if let Some(window) = app_handle.webview_windows().into_values().next() {
+        dialog = dialog.set_parent(&window);
+    }
+    let Some(file) = dialog.blocking_pick_file() else {
         return Ok(None);
     };
 
@@ -33,6 +37,29 @@ pub(crate) async fn pick_api_workflow_file(
         .into_path()
         .map_err(|_| AppError::filesystem("selected workflow file is unavailable"))?;
     files.read_json(&path).await.map(Some)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn workflow_onboarding_import_path(
+    state: State<'_, AppState>,
+    path: String,
+    existing_workflow_id: Option<String>,
+) -> Result<WorkflowOnboardingDraftView, AppError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::invalid_input("工作流文件路径不能为空"));
+    }
+    let (bytes, original_filename) = state
+        .workflow
+        .files
+        .read_json(std::path::Path::new(trimmed))
+        .await?;
+    state
+        .workflow
+        .onboarding
+        .import_bytes(bytes, original_filename, existing_workflow_id)
+        .await
+        .map_err(map_onboarding_error)
 }
 
 #[tauri::command(rename_all = "camelCase")]

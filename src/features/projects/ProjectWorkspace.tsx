@@ -20,6 +20,7 @@ import type { ProjectTemplate, TemplateProjectResult } from "../../types/organiz
 import { ProjectWorkflowSettings } from "./ProjectWorkflowSettings";
 import { ProjectWorkflowPreflight } from "./ProjectWorkflowPreflight";
 import { ProjectProductionReadiness } from "./ProjectProductionReadiness";
+import { ThemedConfirmDialog } from "../../app/WorkspaceErrorBoundary";
 
 interface Props {
   showWorkflowSettings?: boolean;
@@ -52,6 +53,8 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
   const [projectWorkflowConfig, setProjectWorkflowConfig] = useState<ProjectWorkflowConfigView>();
   const [projectQuery, setProjectQuery] = useState("");
   const [projectSort, setProjectSort] = useState<"updated" | "created" | "name">("updated");
+  const [pendingDeleteTemplate, setPendingDeleteTemplate] = useState<ProjectTemplate>();
+  const [confirmRestoreBackup, setConfirmRestoreBackup] = useState(false);
 
   async function reloadTemplates() {
     setTemplates(await listProjectTemplates());
@@ -84,8 +87,14 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
     } catch (value) { setError(toUserMessage(value)); } finally { setTemplateBusy(false); }
   }
 
-  async function removeTemplate(template: ProjectTemplate) {
-    if (!window.confirm(`删除项目模板“${template.name}”？此操作不会删除项目、工作流、预设或素材。`)) return;
+  function removeTemplate(template: ProjectTemplate) {
+    setPendingDeleteTemplate(template);
+  }
+
+  async function confirmRemoveTemplate() {
+    const template = pendingDeleteTemplate;
+    if (!template) return;
+    setPendingDeleteTemplate(undefined);
     setTemplateBusy(true); setError(undefined);
     try { await deleteProjectTemplate(template.id); await reloadTemplates(); }
     catch (value) { setError(toUserMessage(value)); } finally { setTemplateBusy(false); }
@@ -164,9 +173,14 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
     }
   }
 
-  async function restoreBackup() {
+  function restoreBackup() {
     if (!backupPreview) return;
-    if (!window.confirm(`确认从归档恢复项目“${backupPreview.projectName}”？会新建项目、不会覆盖、不会自动生成。`)) return;
+    setConfirmRestoreBackup(true);
+  }
+
+  async function confirmRestoreBackupAction() {
+    if (!backupPreview) return;
+    setConfirmRestoreBackup(false);
     setBackupBusy(true);
     setError(undefined);
     try {
@@ -388,6 +402,23 @@ export function ProjectWorkspace({ projects, activeProjectId, catalog, onOpen, o
           <div className="project-form-actions"><button type="submit" disabled={templateBusy || !templateName.trim()}>{templateBusy ? "正在保存..." : templateForm.kind === "edit" ? "保存修改" : "创建并打开"}</button><button type="button" className="quiet-button" onClick={() => setTemplateForm(undefined)} disabled={templateBusy}>取消</button></div>
         </form>}
       </section>
+      <ThemedConfirmDialog
+        open={Boolean(pendingDeleteTemplate)}
+        title="删除项目模板"
+        message={pendingDeleteTemplate ? `删除项目模板“${pendingDeleteTemplate.name}”？此操作不会删除项目、工作流、预设或素材。` : ""}
+        confirmLabel="确认删除"
+        danger
+        onConfirm={() => void confirmRemoveTemplate()}
+        onCancel={() => setPendingDeleteTemplate(undefined)}
+      />
+      <ThemedConfirmDialog
+        open={confirmRestoreBackup && Boolean(backupPreview)}
+        title="从归档恢复项目"
+        message={backupPreview ? `确认从归档恢复项目“${backupPreview.projectName}”？会新建项目、不会覆盖、不会自动生成。` : ""}
+        confirmLabel="确认恢复"
+        onConfirm={() => void confirmRestoreBackupAction()}
+        onCancel={() => setConfirmRestoreBackup(false)}
+      />
     </section>
   );
 }

@@ -4,11 +4,16 @@ import {readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {uiPhase5EParentReader,phase5EParentFacts,PHASE5E_MANIFEST,PHASE5E_PARENT,PHASE5E_EXISTING} from '../../scripts/ui-phase5e-ci-shard-successor-guard.mjs';
 import {uiPhase5DParentReader} from '../../scripts/ui-phase5d-ci-timeout-successor-guard.mjs';
 
-it('gates all three complete Vitest shards and mandatory architecture, TypeScript and Vite under the stable frontend status',()=>{
+it('gates all frontend shards and mandatory checks unless backend-only dispatch is explicitly selected',()=>{
  const ci=readFileSync('.github/workflows/ci.yml','utf8');
  expect(ci).toContain('name: Frontend source checks');
  expect(ci).toContain('needs: [frontend_tests, frontend_boundary_tests]');
- expect(ci).toContain('if: ${{ always() }}');
+ expect(ci).toContain('if: ${{ always() && !inputs.backend_only }}');
+ expect(ci).toMatch(/workflow_dispatch:[\s\S]*?backend_only:[\s\S]*?type: boolean[\s\S]*?default: false/);
+ for(const job of ['frontend_tests','frontend_boundary_tests']){
+  const block=ci.split('  '+job+':\n')[1]?.split(/\n  [a-z_]+:\n/)[0] ?? '';
+  expect(block).toContain('if: ${{ !inputs.backend_only }}');
+ }
  expect(ci).toContain('SHARD_RESULT: ${{ needs.frontend_tests.result }}');
  expect(ci).toContain('BOUNDARY_RESULT: ${{ needs.frontend_boundary_tests.result }}');
  expect(ci).toContain('name: Frontend Boundary probes');

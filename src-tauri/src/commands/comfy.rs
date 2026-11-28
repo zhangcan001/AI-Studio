@@ -30,16 +30,34 @@ pub fn comfy_get_settings(state: tauri::State<'_, AppState>) -> Result<SettingsV
 pub async fn comfy_test_connection(
     state: tauri::State<'_, AppState>,
     endpoint: String,
+    auth_header: Option<String>,
+    allow_system_proxy: Option<bool>,
 ) -> Result<EndpointTestView, AppError> {
-    state.system.settings.test_connection(&endpoint).await
+    state
+        .system
+        .settings
+        .test_connection_with_options(&endpoint, auth_header.as_deref(), allow_system_proxy)
+        .await
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub async fn comfy_save_endpoint(
     state: tauri::State<'_, AppState>,
     endpoint: String,
+    auth_header: Option<String>,
+    clear_auth_header: Option<bool>,
+    allow_system_proxy: Option<bool>,
 ) -> Result<SettingsView, AppError> {
-    state.system.settings.save_and_apply(&endpoint).await
+    state
+        .system
+        .settings
+        .save_and_apply_with_options(
+            &endpoint,
+            auth_header.as_deref(),
+            clear_auth_header.unwrap_or(false),
+            allow_system_proxy,
+        )
+        .await
 }
 
 #[tauri::command(rename_all = "camelCase")]

@@ -305,6 +305,29 @@ impl ComfyEventSubscription for EmptyComfyEvents {
 }
 
 #[derive(Clone)]
+struct TransientFailureEvents {
+    remaining: Arc<AtomicUsize>,
+    prompt: Arc<Mutex<Option<String>>>,
+}
+#[async_trait]
+impl ComfyEventSubscription for TransientFailureEvents {
+    async fn next_event(&mut self) -> Result<Option<ComfyExecutionEvent>, ComfyAdapterError> {
+        if self
+            .remaining
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
+        {
+            return Ok(Some(ComfyExecutionEvent::ExecutionError {
+                prompt_id: self.prompt.lock().unwrap().clone().unwrap(),
+                node_id: None,
+                message: "CUDA out of memory".into(),
+                raw: json!({}),
+            }));
+        }
+        Ok(None)
+    }
+}
+
 struct CountingComfyAdapter {
     health_calls: Arc<AtomicUsize>,
     object_info_calls: Arc<AtomicUsize>,
@@ -325,6 +348,8 @@ struct CountingComfyAdapter {
     object_info_hold_release: Arc<Notify>,
     hold_submission: Arc<AtomicBool>,
     accept_next_submission: Arc<AtomicBool>,
+    accept_all_submissions: Arc<AtomicBool>,
+    transient_failures: Arc<AtomicUsize>,
     accepted_prompt_id: Arc<Mutex<Option<String>>>,
     cancelled_prompt_ids: Arc<Mutex<Vec<String>>>,
     reject_submission_as_validation_error: Arc<AtomicBool>,
@@ -356,6 +381,8 @@ impl CountingComfyAdapter {
             object_info_hold_release: Arc::new(Notify::new()),
             hold_submission: Arc::new(AtomicBool::new(false)),
             accept_next_submission: Arc::new(AtomicBool::new(false)),
+            accept_all_submissions: Arc::new(AtomicBool::new(false)),
+            transient_failures: Arc::new(AtomicUsize::new(0)),
             accepted_prompt_id: Arc::new(Mutex::new(None)),
             cancelled_prompt_ids: Arc::new(Mutex::new(Vec::new())),
             reject_submission_as_validation_error: Arc::new(AtomicBool::new(false)),
@@ -631,7 +658,9 @@ impl ComfyAdapter for CountingComfyAdapter {
         }
         // Cancellation tests opt into one acknowledged remote submission.
         // Preparation tests retain the default hard rejection of execution.
-        if self.accept_next_submission.swap(false, Ordering::SeqCst) {
+        if self.accept_all_submissions.load(Ordering::SeqCst)
+            || self.accept_next_submission.swap(false, Ordering::SeqCst)
+        {
             *self.accepted_prompt_id.lock().unwrap() = Some(prompt_id.to_owned());
             return Ok(PromptSubmission {
                 prompt_id: prompt_id.to_owned(),
@@ -648,6 +677,12 @@ impl ComfyAdapter for CountingComfyAdapter {
         &self,
         _client_id: &str,
     ) -> Result<Box<dyn ComfyEventSubscription>, ComfyAdapterError> {
+        if self.accept_all_submissions.load(Ordering::SeqCst) {
+            return Ok(Box::new(TransientFailureEvents {
+                remaining: self.transient_failures.clone(),
+                prompt: self.accepted_prompt_id.clone(),
+            }));
+        }
         Ok(Box::new(EmptyComfyEvents))
     }
 }
@@ -3224,4 +3259,125 @@ async fn count_distinct(pool: &SqlitePool, column: &str, table: &str) -> i64 {
         .fetch_one(pool)
         .await
         .expect("distinct count should succeed")
+}
+
+#[tokio::test]
+async fn transient_queue_failure_retries_through_existing_admission_and_stops_at_limit() {
+    let harness = harness().await;
+    harness
+        .comfy
+        .accept_all_submissions
+        .store(true, Ordering::SeqCst);
+    harness.comfy.transient_failures.store(2, Ordering::SeqCst);
+    harness.queue.set_desktop_preferences_hook(
+        harness.comfy.clone(),
+        Arc::new(|| ai_studio_lib::application::ports::DesktopPreferences {
+            transient_retry_limit: 1,
+            ..Default::default()
+        }),
+    );
+    let admission: Arc<
+        dyn ai_studio_lib::application::production_queue_service::ProductionRetryAdmission,
+    > = harness.admission.clone();
+    harness
+        .queue
+        .set_retry_admission(Arc::downgrade(&admission));
+    let mut request = direct_generation_batch_request(&harness, 1);
+    request.continue_on_failure = false;
+    let batch = harness
+        .queue
+        .create_direct_generation_batch(request)
+        .await
+        .unwrap();
+    harness
+        .admission
+        .start(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .unwrap();
+    let detail = tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let detail = harness
+                .queue
+                .get(PROJECT_ID, batch.batch.id.as_str())
+                .await
+                .unwrap();
+            if detail.items.len() == 2 && detail.items.iter().all(|i| i.status.is_terminal()) {
+                break detail;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("one admitted retry must execute and settle without a manual resume");
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(detail.batch.status, ProductionBatchStatus::Paused);
+    assert_eq!(
+        detail.items[1].retry_of_item_id.as_deref(),
+        Some(detail.items[0].id.as_str())
+    );
+}
+
+#[tokio::test]
+async fn disabling_auto_retry_during_backoff_prevents_a_new_submission() {
+    let harness = harness().await;
+    harness
+        .comfy
+        .accept_all_submissions
+        .store(true, Ordering::SeqCst);
+    harness.comfy.transient_failures.store(2, Ordering::SeqCst);
+    let limit = Arc::new(AtomicUsize::new(1));
+    let configured = limit.clone();
+    harness.queue.set_desktop_preferences_hook(
+        harness.comfy.clone(),
+        Arc::new(
+            move || ai_studio_lib::application::ports::DesktopPreferences {
+                transient_retry_limit: configured.load(Ordering::SeqCst) as u8,
+                ..Default::default()
+            },
+        ),
+    );
+    let admission: Arc<
+        dyn ai_studio_lib::application::production_queue_service::ProductionRetryAdmission,
+    > = harness.admission.clone();
+    harness
+        .queue
+        .set_retry_admission(Arc::downgrade(&admission));
+    let mut request = direct_generation_batch_request(&harness, 1);
+    request.continue_on_failure = false;
+    let batch = harness
+        .queue
+        .create_direct_generation_batch(request)
+        .await
+        .unwrap();
+    harness
+        .admission
+        .start(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let detail = harness
+                .queue
+                .get(PROJECT_ID, batch.batch.id.as_str())
+                .await
+                .unwrap();
+            if detail.batch.status == ProductionBatchStatus::Paused
+                && detail.items[0].status.is_terminal()
+            {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    limit.store(0, Ordering::SeqCst);
+    sleep(Duration::from_millis(3300)).await;
+    let detail = harness
+        .queue
+        .get(PROJECT_ID, batch.batch.id.as_str())
+        .await
+        .unwrap();
+    assert_eq!(detail.items.len(), 1);
+    assert_eq!(harness.comfy.submit_calls.load(Ordering::SeqCst), 1);
 }

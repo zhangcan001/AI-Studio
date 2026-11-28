@@ -1,11 +1,18 @@
+import { commitWorkflowImport, discardOnboarding, importWorkflowFromPath, pickApiWorkflow, queryWorkflowWorkspace, reanalyzeWorkflowImport, removeWorkflow, restoreWorkflow, setOnboardingInputMapping, setOnboardingMetadata, setOnboardingOutputMapping, setWorkflowEnabled } from "../services/workflowClient";
+export type { WorkflowWorkspaceQueryResponse } from "../services/workflowClient";
+
+/** Restricted import/settings bridge; execution remains owned by Production Queue. */
+export const customWorkflowTransport = { commitWorkflowImport, discardOnboarding, importWorkflowFromPath, pickApiWorkflow, queryWorkflowWorkspace, reanalyzeWorkflowImport, removeWorkflow, restoreWorkflow, setOnboardingInputMapping, setOnboardingMetadata, setOnboardingOutputMapping, setWorkflowEnabled };
+
 import { invokeCommand } from "../services/ipc";
 import { normalizeProductError } from "./errors";
 import { buildAssetMediaUrl } from "../services/mediaUrl";
-import { folderBatchImportPick, folderBatchImportRescan, folderBatchImportDiscard, folderBatchImportCommit } from "../services/tauriClient";
+import { folderBatchImportPick, pickFolderImportFromPath, folderBatchImportRescan, folderBatchImportDiscard, folderBatchImportCommit } from "../services/tauriClient";
 
 /** Product bridge reuses the exact typed Native commands; no feature gains legacy access. */
 export const folderImportTransport = {
   pick: (projectId:string) => folderBatchImportPick(projectId),
+  pickPath: (projectId:string, path:string) => pickFolderImportFromPath(projectId, path),
   rescan: (sessionId:string, options:import("../types/folderBatchImport").FolderImportPreviewOptions) => folderBatchImportRescan(sessionId,options),
   discard: (sessionId:string) => folderBatchImportDiscard(sessionId),
   commit: (request:import("../types/folderBatchImport").FolderImportCommitRequest) => folderBatchImportCommit(request),
@@ -55,7 +62,7 @@ interface ProductCommands {
   product_creation_readiness_get: { args: { request: CreationSubmission }; result: CreationReadiness };
   product_creation_generate: { args: { request: CreationSubmission }; result: CreationAccepted };
   product_creation_get: { args: { projectId: string; shotId: string | null; stage: "image" | "video" }; result: CreationContext };
-  product_selected_videos_export: { args: { projectId: string; openDirectory?: boolean; confirmedRejectedAssetIds?: string[] }; result: import("./types").SelectedVideoExport | null };
+  product_selected_videos_export: { args: { projectId: string; openDirectory?: boolean; confirmedRejectedAssetIds?: string[]; concatVideo?: boolean; exportNleTimeline?: boolean }; result: import("./types").SelectedVideoExport | null };
   product_creation_workbench_get: { args: { projectId: string; stage: "image" | "video"; limit: number; offset?: number }; result: import("./types").CreationWorkbench };
   product_creation_shot_create: { args: { projectId: string; sourceShotId?: string }; result: CreationShotSummary };
   product_creation_shot_row_save: { args: { projectId: string; request: import("./types").CreationShotRowSave }; result: import("./types").CreationShotRowSaveResult };

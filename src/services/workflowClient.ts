@@ -137,6 +137,7 @@ export {
   inspectWorkflowPurge,
   repairBuiltinWorkflowPackage,
   pickApiWorkflow,
+  importWorkflowFromPath,
   publishOnboarding,
   recheckWorkflowCapability,
   recheckAllWorkflowCapabilities,

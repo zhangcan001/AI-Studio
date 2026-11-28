@@ -31,7 +31,7 @@ it("orders runtime setup/configuration/preflight ahead of summary and deep diagn
   expect(screen.getByRole("link", { name: "配置并应用 ComfyUI 地址" }).getAttribute("href")).toBe("#comfy-endpoint");
   expect(screen.getByRole("link", { name: "执行运行预检" }).getAttribute("href")).toBe("#settings-preflight-title");
   expect(ids.indexOf("ComfyUI 运行环境")).toBeLessThan(ids.indexOf("运行预检"));
-  expect(ids.indexOf("运行预检")).toBeLessThan(ids.indexOf("应用信息"));
+  expect(ids.indexOf("运行预检")).toBeLessThan(ids.indexOf("应用信息与隐私"));
   const preflight = screen.getByRole("region", { name: "运行预检" });
   expect(preflight.compareDocumentPosition(screen.getByRole("region", { name: "执行诊断" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.getByRole("region", { name: "修复任务" })).toBeTruthy(); expect(screen.getByRole("button", { name: "导出诊断包" })).toBeTruthy();

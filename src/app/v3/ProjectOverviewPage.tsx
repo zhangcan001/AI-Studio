@@ -46,7 +46,17 @@ function readinessTone(value: string | null | undefined): "ok" | "warn" | "bad" 
   return "muted";
 }
 
-export function ProjectOverviewPage({ projectId, navigate }: { projectId: string; navigate: (route: AppRoute) => void }) {
+export function ProjectOverviewPage({
+  projectId,
+  navigate,
+  onboardingDismissed,
+  onDismissOnboarding,
+}: {
+  projectId: string;
+  navigate: (route: AppRoute) => void;
+  onboardingDismissed?: boolean;
+  onDismissOnboarding?: () => void;
+}) {
   const [state, setState] = useState<{ projectId: string; data?: ProjectOverview; error?: string }>({ projectId });
   const [refreshing, setRefreshing] = useState(false);
   const manualRefreshRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -194,6 +204,43 @@ export function ProjectOverviewPage({ projectId, navigate }: { projectId: string
         </div>
         <button type="button" className="primary-button" onClick={() => navigate(action.route)}>{action.label}</button>
       </section>
+
+      {onboardingDismissed === false && (totalShots === 0 || data.runtimeReadiness.connection !== "CONNECTED") && (
+        <section className="v3-onboarding-card" aria-label="快速上手引导">
+          <div className="v3-card-head">
+            <div>
+              <h2>3 步快速开始（纯单机本地工作台）</h2>
+              <p className="v3-overview-desc">按下面 3 步完成准备，之后拖入分镜文件夹即可自动批量出片。</p>
+            </div>
+            {onDismissOnboarding && (
+              <button type="button" className="v3-card-link" onClick={onDismissOnboarding}>不再提示</button>
+            )}
+          </div>
+          <ol className="v3-onboarding-steps">
+            <li data-done={data.runtimeReadiness.connection === "CONNECTED" ? "true" : undefined}>
+              <strong>1. 连接 ComfyUI</strong>
+              <span>支持本机 127.0.0.1:8188 或云算力反代地址</span>
+              <button type="button" onClick={() => navigate({ kind: "system-settings", section: "general", returnTo: { kind: "project", projectId, page: "overview" } })}>
+                {data.runtimeReadiness.connection === "CONNECTED" ? "已连接 · 查看设置" : "去配置连接"}
+              </button>
+            </li>
+            <li data-done={data.runtimeReadiness.workflowReady > 0 ? "true" : undefined}>
+              <strong>2. 确认或导入工作流</strong>
+              <span>选用内置视频生成器，或直接拖入任意 ComfyUI JSON 工作流</span>
+              <button type="button" onClick={() => navigate({ kind: "project-settings", projectId, section: "generators" })}>
+                管理与导入工作流
+              </button>
+            </li>
+            <li data-done={totalShots > 0 ? "true" : undefined}>
+              <strong>3. 导入分镜文件夹并生成</strong>
+              <span>在创作台拖入含参考图与 prompts.txt 的文件夹，一键批量入队</span>
+              <button type="button" onClick={() => navigate({ kind: "create", projectId, stage: "video" })}>
+                前往分镜创作台
+              </button>
+            </li>
+          </ol>
+        </section>
+      )}
 
       <nav className="v3-quick-nav" aria-label="项目快捷入口">
         <button type="button" onClick={() => navigate({ kind: "create", projectId, stage: "video" })}>

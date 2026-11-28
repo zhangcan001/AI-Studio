@@ -3,9 +3,10 @@ import { NormalProductPages } from "./NormalProductPages";
 import { useRuntimeStatusMonitor } from "./useRuntimeStatusMonitor";
 import type { ComfyStatus } from "../types/comfy";
 import { useShotConsistencyController } from "../features/shots/useShotConsistencyController";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getComfyStatus,
+  getDesktopPreferences,
   listRecentTasks,
   getConsistencyScopeBinding,
   getShotConsistencyBinding,
@@ -24,6 +25,8 @@ import {
   listShots,
   reconcileActiveTasks,
   refreshComfyCapabilities,
+  saveDesktopPreferences,
+  setAppUnsavedDraft,
 } from "../services/tauriClient";
 import { subscribeTaskUpdates } from "../services/taskEvents";
 import { useTaskStore } from "../stores/taskStore";
@@ -35,7 +38,7 @@ import type { TemplateProjectResult } from "../types/organization";
 import type { ProjectCommandCenterNavigationRequest } from "../features/projects/ProjectCommandCenter";
 import { bootstrap, type BootstrapState } from "./bootstrap";
 import { WorkspaceErrorBoundary } from "./WorkspaceErrorBoundary";
-import { storyboardDraftKeys, useStudioStore } from "../stores/studioStore";
+import { storyboardDraftKeys, studioHasUnsavedDraft, useStudioStore } from "../stores/studioStore";
 import type { ReusableGenerationDraft } from "../types/history";
 import type { StudioAssetType } from "../types/generation";
 import type { ProjectView } from "../types/project";
@@ -122,6 +125,43 @@ function App() {
   const focusedAssetId = location.assetId;
   const focusedCollectionFilter = location.collectionFilter;
   const [shotDraftDirty, setShotDraftDirty] = useState(false);
+  const storeDraftDirty = useStudioStore(studioHasUnsavedDraft);
+  const desktopNotificationsRef = useRef(true);
+  const [desktopPrefs, setDesktopPrefs] = useState<import("../types/settings").DesktopPreferences>();
+  useEffect(() => {
+    void getDesktopPreferences()
+      .then((prefs) => {
+        desktopNotificationsRef.current = prefs.desktopNotifications;
+        setDesktopPrefs(prefs);
+      })
+      .catch(() => { /* fallback default */ });
+    const onPrefsChanged = (event: Event) => {
+      const next = (event as CustomEvent<import("../types/settings").DesktopPreferences>).detail;
+      if (!next) return;
+      desktopNotificationsRef.current = next.desktopNotifications;
+      setDesktopPrefs(next);
+    };
+    window.addEventListener("ai-studio:desktop-prefs-changed", onPrefsChanged);
+    return () => window.removeEventListener("ai-studio:desktop-prefs-changed", onPrefsChanged);
+  }, []);
+  const dismissOnboarding = useCallback(() => {
+    const next: import("../types/settings").DesktopPreferences = {
+      autoFreeVramBetweenItems: desktopPrefs?.autoFreeVramBetweenItems ?? false,
+      transientRetryLimit: desktopPrefs?.transientRetryLimit ?? 0,
+      desktopNotifications: desktopPrefs?.desktopNotifications ?? true,
+      onboardingDismissed: true,
+    };
+    setDesktopPrefs(next);
+    void saveDesktopPreferences(next)
+      .then((saved) => {
+        desktopNotificationsRef.current = saved.desktopNotifications;
+        setDesktopPrefs(saved);
+      })
+      .catch(() => { /* ignore */ });
+  }, [desktopPrefs]);
+  useEffect(() => {
+    void setAppUnsavedDraft(Boolean(shotDraftDirty || storeDraftDirty)).catch(() => { /* ignore outside Tauri */ });
+  }, [shotDraftDirty, storeDraftDirty]);
   const [bootstrapState, setBootstrapState] = useState<BootstrapState | null>(null);
   const applyRuntimeStatus = useCallback((status?: ComfyStatus) => {
     setBootstrapState(current => {
@@ -144,6 +184,34 @@ function App() {
   const activeProjectId = routeProjectId(route);
   const activeProject = projects.find((project) => project.id === activeProjectId);
   const { recentTasks, projectContextLoading, reconciling, recoveryNotice, setRecoveryNotice, reconcileTasks } = useProjectTaskRecovery(activeProjectId, setError, taskRecoveryServices);
+  const prevTaskStatusesRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const prev = prevTaskStatusesRef.current;
+    for (const task of recentTasks) {
+      const previousStatus = prev.get(task.id);
+      prev.set(task.id, task.status);
+      if (
+        previousStatus &&
+        ["PENDING", "PREPARING", "QUEUED", "RUNNING", "COLLECTING"].includes(previousStatus) &&
+        ["SUCCEEDED", "FAILED"].includes(task.status) &&
+        desktopNotificationsRef.current &&
+        typeof Notification !== "undefined" &&
+        (document.visibilityState === "hidden" || !document.hasFocus())
+      ) {
+        const title = task.status === "SUCCEEDED" ? "AI Studio · 生成完成" : "AI Studio · 生成失败";
+        const body = task.status === "SUCCEEDED"
+          ? "视频生成任务已完成，点击返回审片与选用。"
+          : (task.error?.message || "任务执行失败，请返回查看原因或重试。");
+        if (Notification.permission === "granted") {
+          new Notification(title, { body });
+        } else if (Notification.permission === "default") {
+          void Notification.requestPermission().then((perm) => {
+            if (perm === "granted") new Notification(title, { body });
+          });
+        }
+      }
+    }
+  }, [recentTasks]);
   const { consistencyProfiles, consistencyReferenceSets, consistencyCostumes, consistencyLoading, consistencyError, loadConsistencyBindingPack, saveConsistencyBindingPack, loadConsistencyContext } = useShotConsistencyController(activeProjectId, shotConsistencyServices);
   const projectLoading = useProjectStore((state) => state.loading);
   const projectError = useProjectStore((state) => state.error);
@@ -574,10 +642,21 @@ function App() {
         {activeProject && (route.kind === "project" || (route.kind === "project-settings" && route.section === "advanced-project")) && (
           <WorkspaceErrorBoundary
             resetKey={activeProject?.id ?? "no-project"}
+            workspaceName={route.kind === "project" ? "项目概览" : "项目指挥台"}
             onBackToAssets={() => navigateToWorkspace("assets")}
             onRetry={() => navigateToWorkspace("command-center")}
           >
-            {route.kind === "project" ? <ProjectOverviewPage key={activeProject.id} projectId={activeProject.id} navigate={navigate} /> : <ProjectCommandCenter project={activeProject} onNavigate={navigateFromCommandCenter} />}
+            {route.kind === "project" ? (
+              <ProjectOverviewPage
+                key={activeProject.id}
+                projectId={activeProject.id}
+                navigate={navigate}
+                onboardingDismissed={desktopPrefs ? desktopPrefs.onboardingDismissed : undefined}
+                onDismissOnboarding={dismissOnboarding}
+              />
+            ) : (
+              <ProjectCommandCenter project={activeProject} onNavigate={navigateFromCommandCenter} />
+            )}
           </WorkspaceErrorBoundary>
         )}
         {activeProject && route.kind === "library" && route.filter === "advanced-assets" && (
@@ -602,6 +681,7 @@ function App() {
         {activeProject && route.kind === "project-settings" && ["advanced-shots", "advanced-production", "advanced-review"].includes(route.section) && (
           <WorkspaceErrorBoundary
             resetKey={activeProject.id}
+            workspaceName="分镜制作工作区"
             onBackToAssets={() => navigateToWorkspace("assets")}
             onRetry={() => navigateToWorkspace("shots")}
           >
@@ -643,6 +723,7 @@ function App() {
         {activeProject && route.kind === "create" && route.surface === "batch" && route.stage === "video" && (
           <WorkspaceErrorBoundary
             resetKey={activeProject.id}
+            workspaceName="批量视频工作区"
             onBackToAssets={() => navigateToWorkspace("assets")}
             onRetry={() => {
               navigateToWorkspace("video");

@@ -21,4 +21,8 @@ impl DatabaseHealthProbe for SqliteDatabaseHealthProbe {
             .await
             .is_ok()
     }
+
+    async fn checkpoint_wal(&self) -> Result<(), crate::error::AppError> {
+        crate::infrastructure::database::checkpoint_wal(&self.pool).await
+    }
 }

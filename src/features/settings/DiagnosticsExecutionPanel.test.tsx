@@ -13,6 +13,8 @@ vi.mock("../../services/diagnosticsClient", () => ({ diagnosticsClient: {
 vi.mock("../../services/tauriClient", () => ({
   getComfySettings: vi.fn().mockResolvedValue({ endpoint: "http://127.0.0.1:1" }),
   listComfyEnvironmentProfiles: vi.fn().mockResolvedValue([]),
+  getDesktopPreferences: vi.fn().mockResolvedValue({ autoFreeVramBetweenItems: false, transientRetryLimit: 0, desktopNotifications: false, onboardingDismissed: false }),
+  getStorageSummary: vi.fn().mockResolvedValue({ currentDataRoot: "fixture", defaultDataRoot: "fixture", envOverrideActive: false, databaseBytes: 0, logsBytes: 0, projectsTotalBytes: 0, projects: [] }),
 }));
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });

@@ -333,7 +333,7 @@ pub mod folder_batch_import {
             .dialog()
             .file()
             .set_parent(&window)
-            .set_title("选择分镜批量导入文件夹（含 manifest.json）")
+            .set_title("选择分镜批量导入文件夹")
             .pick_folder(move |folder| {
                 let _ = tx.send(folder);
             });
@@ -352,6 +352,28 @@ pub mod folder_batch_import {
             .pick(&project_id, root)
             .await
             .map(Some)
+            .map_err(map_error)
+    }
+    #[tauri::command(rename_all = "camelCase")]
+    pub async fn folder_batch_import_pick_path(
+        state: State<'_, AppState>,
+        project_id: String,
+        path: String,
+    ) -> Result<Preview, AppError> {
+        super::validate_project_id(&project_id)?;
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::invalid_input("文件夹路径不能为空"));
+        }
+        let root = std::path::PathBuf::from(trimmed);
+        if !root.is_dir() {
+            return Err(AppError::invalid_input("请拖入文件夹而不是单个文件"));
+        }
+        state
+            .shots
+            .folder_import
+            .pick(&project_id, root)
+            .await
             .map_err(map_error)
     }
     #[tauri::command(rename_all = "camelCase")]

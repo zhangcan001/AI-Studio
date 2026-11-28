@@ -54,6 +54,7 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   const exportLock=useRef(false);
   const [delivery,setDelivery] = useState<import("../../product/types").SelectedVideoExport>();
   const [openExport,setOpenExport]=useState(false);
+  const [concatExport,setConcatExport]=useState(false);
   const [copyNotice,setCopyNotice]=useState<string>();
   const [batchOpen, setBatchOpen] = useState(false);
   const [page, setPage] = useState(0);
@@ -317,14 +318,15 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
   };
   const exportSelected = async () => {
     if(exportLock.current)return;exportLock.current=true;setExporting(true); setError(undefined);
+    const extraOpts = concatExport ? { concatVideo: true, exportNleTimeline: true } : undefined;
     try{
       let result;
-      try { result = await productClient.creation.exportSelected(projectId,openExport); }
+      try { result = extraOpts ? await productClient.creation.exportSelected(projectId,openExport,undefined,extraOpts) : await productClient.creation.exportSelected(projectId,openExport); }
       catch (cause) {
         const error = normalizeProductError(cause), ids = error.details.rejectedAssetIds;
         if (error.code !== "EXPORT_REJECTED_CONFIRMATION_REQUIRED" || !ids?.length) throw cause;
         if (!mounted.current || scope.current !== projectId || !window.confirm(`全项目已选用视频中有 ${ids.length} 个已退回候选。选用不等于审核通过。仍要将这些视频包含在交付导出中吗？`)) return;
-        result = await productClient.creation.exportSelected(projectId,openExport,ids);
+        result = extraOpts ? await productClient.creation.exportSelected(projectId,openExport,ids,extraOpts) : await productClient.creation.exportSelected(projectId,openExport,ids);
       }
       if(mounted.current&&scope.current===projectId&&result)setDelivery(result);
     }
@@ -437,13 +439,14 @@ export function StoryboardWorkbench({ route, navigate, runtime, onDirtyChange, r
           <summary>导出与队列 ▾</summary>
           <div className="storyboard-header-menu-body">
             <button type="button" disabled={exporting} onClick={() => { if (headerMenuRef.current) headerMenuRef.current.open = false; void exportSelected(); }}>{exporting ? "正在导出…" : "导出全项目已选用视频"}</button>
+            <label className="storyboard-menu-check"><input type="checkbox" checked={concatExport} disabled={exporting} onChange={e => setConcatExport(e.target.checked)} />同步拼接完整样片 MP4</label>
             <label className="storyboard-menu-check"><input type="checkbox" checked={openExport} disabled={exporting} onChange={e => setOpenExport(e.target.checked)} />导出后打开目录</label>
             <button type="button" onClick={() => { if (headerMenuRef.current) headerMenuRef.current.open = false; setRunRoute({ kind: "runs", projectId }); }}>任务队列与运行记录</button>
           </div>
         </details>
       </div>
     </header>
-    {delivery && <section aria-label="导出回执" className="storyboard-export-receipt"><div className="storyboard-export-receipt-head"><p role="status">已导出 {delivery.exported} 项，失败 {delivery.failed} 项。目录：{delivery.directory}</p><div className="storyboard-export-receipt-actions"><button type="button" onClick={()=>{void Promise.resolve().then(()=>navigator.clipboard.writeText(delivery.directory)).then(()=>{setCopyNotice("导出路径已复制。");window.dispatchEvent(new CustomEvent("ai-studio:toast",{detail:{message:"导出路径已复制",tone:"success"}}));},()=>setCopyNotice("复制失败，可手动选择目录文本复制。"));}}>复制导出路径</button><button type="button" className="banner-dismiss-btn" aria-label="关闭导出回执" title="关闭" onClick={() => { setDelivery(undefined); setCopyNotice(undefined); }}>×</button></div></div>{copyNotice&&<p role="status">{copyNotice}</p>}{delivery.manifestError&&<p role="alert">{delivery.manifestError}</p>}{delivery.openError&&<p role="alert">{delivery.openError}</p>}<ul>{delivery.entries?.filter(e=>e.error).map(e=><li key={e.shotId}>第 {e.ordinal+1} 镜 · {e.shotName}：{e.error}</li>)}</ul><small>export-manifest.json 保留镜头、素材和文件名对应关系，不包含绝对源路径。</small></section>}
+    {delivery && <section aria-label="导出回执" className="storyboard-export-receipt"><div className="storyboard-export-receipt-head"><p role="status">已导出 {delivery.exported} 项，失败 {delivery.failed} 项。目录：{delivery.directory}</p><div className="storyboard-export-receipt-actions"><button type="button" onClick={()=>{void Promise.resolve().then(()=>navigator.clipboard.writeText(delivery.directory)).then(()=>{setCopyNotice("导出路径已复制。");window.dispatchEvent(new CustomEvent("ai-studio:toast",{detail:{message:"导出路径已复制",tone:"success"}}));},()=>setCopyNotice("复制失败，可手动选择目录文本复制。"));}}>复制导出路径</button><button type="button" className="banner-dismiss-btn" aria-label="关闭导出回执" title="关闭" onClick={() => { setDelivery(undefined); setCopyNotice(undefined); }}>×</button></div></div>{delivery.mergedVideo&&<p role="status">已拼接完整样片：{delivery.mergedVideo}</p>}{delivery.mergedError&&<p role="alert">{delivery.mergedError}</p>}{(delivery.edlFile||delivery.fcpxmlFile)&&<p role="status">已同步生成剪辑时间线：{[delivery.edlFile,delivery.fcpxmlFile].filter(Boolean).join(" / ")}（支持 Premiere / DaVinci / FCP 导入）</p>}{copyNotice&&<p role="status">{copyNotice}</p>}{delivery.timelineError&&<p role="alert">{delivery.timelineError}</p>}{delivery.manifestError&&<p role="alert">{delivery.manifestError}</p>}{delivery.openError&&<p role="alert">{delivery.openError}</p>}<ul>{delivery.entries?.filter(e=>e.error).map(e=><li key={e.shotId}>第 {e.ordinal+1} 镜 · {e.shotName}：{e.error}</li>)}</ul><small>export-manifest.json 保留镜头、素材和文件名对应关系，不包含绝对源路径。</small></section>}
     {orderError && <p role="alert">{orderError}</p>}{orderNotice&&<p role="status">{orderNotice}</p>}
     {error && <p role="alert" className="storyboard-error">{error}</p>}
     {editing ? <div className="storyboard-editing-body">

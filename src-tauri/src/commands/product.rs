@@ -1199,8 +1199,11 @@ pub async fn product_selected_videos_export(
     project_id: String,
     open_directory: Option<bool>,
     confirmed_rejected_asset_ids: Option<Vec<String>>,
+    concat_video: Option<bool>,
+    export_nle_timeline: Option<bool>,
 ) -> Result<Option<crate::application::product::selected_export::SelectedVideoExport>, ProductError>
 {
+    use tauri::Manager;
     use tauri_plugin_dialog::DialogExt;
     let mut shots = state
         .shots
@@ -1241,7 +1244,11 @@ pub async fn product_selected_videos_export(
         confirmed_rejected_asset_ids.as_deref(),
     )?;
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog().file().pick_folder(move |folder| {
+    let mut dialog = app.dialog().file().set_title("选择视频导出目录");
+    if let Some(window) = app.webview_windows().into_values().next() {
+        dialog = dialog.set_parent(&window);
+    }
+    dialog.pick_folder(move |folder| {
         let _ = tx.send(folder);
     });
     let Some(folder) = rx.await.map_err(ProductError::internal)? else {
@@ -1289,8 +1296,14 @@ pub async fn product_selected_videos_export(
         &rejected,
         confirmed_rejected_asset_ids.as_deref(),
     )?;
+    let options = crate::application::product::selected_export::ExportOptions {
+        concat_video: concat_video.unwrap_or(false),
+        export_nle_timeline: export_nle_timeline.unwrap_or(true),
+    };
     let mut result = tauri::async_runtime::spawn_blocking(move || {
-        crate::application::product::selected_export::copy_selected_videos(&parent, &sources)
+        crate::application::product::selected_export::copy_selected_videos_with_options(
+            &parent, &sources, options,
+        )
     })
     .await
     .map_err(ProductError::internal)?

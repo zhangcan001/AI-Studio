@@ -1,15 +1,60 @@
 export interface ComfySettingsView {
   schemaVersion: number;
   endpoint: string;
+  authConfigured?: boolean;
+  allowSystemProxy?: boolean;
   warning?: string | null;
+}
+
+export interface DesktopPreferences {
+  autoFreeVramBetweenItems: boolean;
+  transientRetryLimit: number;
+  desktopNotifications: boolean;
+  onboardingDismissed: boolean;
+}
+
+export interface ProjectStorageUsageView {
+  projectId: string;
+  projectName: string;
+  sizeBytes: number;
+}
+
+export interface StorageSummaryView {
+  currentDataRoot: string;
+  defaultDataRoot: string;
+  persistedCustomRoot?: string | null;
+  pendingMigrationTarget?: string | null;
+  envOverrideActive: boolean;
+  freeBytes?: number | null;
+  totalBytes?: number | null;
+  databaseBytes: number;
+  logsBytes: number;
+  projectsTotalBytes: number;
+  projects: ProjectStorageUsageView[];
+}
+
+export interface RejectedCleanupResultView {
+  inspected: number;
+  deletedCount: number;
+  skippedInUse: number;
+  freedBytes: number;
 }
 
 export interface ComfyEnvironmentProfile {
   id: string;
   name: string;
   endpoint: string;
+  authHeader?: string | null;
+  allowSystemProxy?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DataRootMigrationView {
+  targetPath: string;
+  migratedFiles: number;
+  migratedBytes: number;
+  backupRetainedPath: string;
 }
 
 export type ComfyPreflightStatus = "READY" | "WARNING" | "BLOCKED";

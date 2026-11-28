@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   applyComfyEnvironmentProfile,
+  checkpointDatabaseWal,
+  cleanupRejectedVideos,
   deleteComfyEnvironmentProfile,
   freeComfyMemory,
   getComfyPreflight,
   getComfySettings,
+  getDesktopPreferences,
+  getStorageSummary,
   listComfyEnvironmentProfiles,
+  openStorageDirectory,
+  pickAndSetDataRoot,
+  resetDataRoot,
   saveComfyEndpoint,
   saveComfyEnvironmentProfile,
+  saveDesktopPreferences,
   testComfyConnection,
 } from "../../services/tauriClient";
 import { diagnosticsClient } from "../../services/diagnosticsClient";
+import { ThemedConfirmDialog } from "../../app/WorkspaceErrorBoundary";
 import type { DiagnosticsSummary } from "../../types/diagnostics";
 import type { ComfyStatus } from "../../types/comfy";
 import type {
@@ -18,6 +27,8 @@ import type {
   ComfyEnvironmentProfile,
   ComfyPreflightReport,
   ComfySettingsView,
+  DesktopPreferences,
+  StorageSummaryView,
 } from "../../types/settings";
 import { UiErrorNotice } from "../../i18n/UiErrorNotice";
 import { formatFileSize, formatDateTime } from "../../i18n/statusLabels";
@@ -60,11 +71,24 @@ export function SettingsWorkspace({
   const [error, setError] = useState<unknown>();
   const [notice, setNotice] = useState<string>();
   const [settings, setSettings] = useState<ComfySettingsView>();
-  const [endpointDraft, setEndpointDraft] = useState("");
+  const [endpointDraft, setEndpointDraft] = useState(() => comfy?.endpoint ?? "");
+  const [authTokenDraft, setAuthTokenDraft] = useState("");
+  const [allowSystemProxyDraft, setAllowSystemProxyDraft] = useState(false);
   const [endpointTesting, setEndpointTesting] = useState(false);
   const [endpointApplying, setEndpointApplying] = useState(false);
   const [endpointTest, setEndpointTest] = useState<ComfyEndpointTest>();
   const [memoryReleasing, setMemoryReleasing] = useState(false);
+  const [desktopPrefs, setDesktopPrefs] = useState<DesktopPreferences>({
+    autoFreeVramBetweenItems: false,
+    transientRetryLimit: 0,
+    desktopNotifications: true,
+    onboardingDismissed: false,
+  });
+  const [prefsSaving, setPrefsSaving] = useState(false);
+  const [storageSummary, setStorageSummary] = useState<StorageSummaryView>();
+  const [storageBusy, setStorageBusy] = useState(false);
+  const [deleteProfileTarget, setDeleteProfileTarget] = useState<ComfyEnvironmentProfile>();
+  const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
   const [environmentProfiles, setEnvironmentProfiles] = useState<ComfyEnvironmentProfile[]>([]);
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -75,6 +99,9 @@ export function SettingsWorkspace({
   const [editingProfileId, setEditingProfileId] = useState<string>();
   const [profileNameDraft, setProfileNameDraft] = useState("");
   const [profileEndpointDraft, setProfileEndpointDraft] = useState("");
+  const [profileAuthDraft, setProfileAuthDraft] = useState("");
+  const [profileProxyDraft, setProfileProxyDraft] = useState(false);
+  const [migrateConfirmOpen, setMigrateConfirmOpen] = useState(false);
   const [preflight, setPreflight] = useState<ComfyPreflightReport>();
   const [preflightLoading, setPreflightLoading] = useState(false);
 
@@ -106,11 +133,22 @@ export function SettingsWorkspace({
         if (!cancelled) {
           setSettings(loaded);
           setEndpointDraft(loaded.endpoint);
+          setAllowSystemProxyDraft(Boolean(loaded.allowSystemProxy));
         }
       })
       .catch((loadError: unknown) => {
         if (!cancelled) setError(loadError);
       });
+    void getDesktopPreferences()
+      .then((loaded) => {
+        if (!cancelled) setDesktopPrefs(loaded);
+      })
+      .catch(() => { /* keep defaults in tests */ });
+    void getStorageSummary()
+      .then((loaded) => {
+        if (!cancelled) setStorageSummary(loaded);
+      })
+      .catch(() => { /* ignore outside Tauri */ });
     return () => {
       cancelled = true;
     };
@@ -140,7 +178,13 @@ export function SettingsWorkspace({
     setNotice(undefined);
     setEndpointTest(undefined);
     try {
-      setEndpointTest(await testComfyConnection(endpointDraft));
+      const options = authTokenDraft.trim() || allowSystemProxyDraft !== Boolean(settings?.allowSystemProxy)
+        ? {
+            ...(authTokenDraft.trim() ? { authHeader: authTokenDraft.trim() } : {}),
+            allowSystemProxy: allowSystemProxyDraft,
+          }
+        : undefined;
+      setEndpointTest(options ? await testComfyConnection(endpointDraft, options) : await testComfyConnection(endpointDraft));
     } catch (testError: unknown) {
       setError(testError);
     } finally {
@@ -148,17 +192,26 @@ export function SettingsWorkspace({
     }
   }
 
-  async function applyEndpoint() {
+  async function applyEndpoint(clearAuth = false) {
     setEndpointApplying(true);
     setError(undefined);
     setNotice(undefined);
     try {
-      const next = await saveComfyEndpoint(endpointDraft);
+      const hasExtra = clearAuth || Boolean(authTokenDraft.trim()) || allowSystemProxyDraft !== Boolean(settings?.allowSystemProxy);
+      const next = hasExtra
+        ? await saveComfyEndpoint(endpointDraft, {
+            ...(authTokenDraft.trim() ? { authHeader: authTokenDraft.trim() } : {}),
+            ...(clearAuth ? { clearAuthHeader: true } : {}),
+            allowSystemProxy: allowSystemProxyDraft,
+          })
+        : await saveComfyEndpoint(endpointDraft);
       setSettings(next);
       setEndpointDraft(next.endpoint);
+      setAllowSystemProxyDraft(Boolean(next.allowSystemProxy));
+      setAuthTokenDraft("");
       setEndpointTest(undefined);
-      setNotice("ComfyUI 地址已保存并应用。");
-      window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: "ComfyUI 地址已保存并应用", tone: "success" } }));
+      setNotice(clearAuth ? "已清除认证令牌并保存 ComfyUI 配置。" : "ComfyUI 地址已保存并应用。");
+      window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: "ComfyUI 连接配置已保存并应用", tone: "success" } }));
       onEndpointApplied?.();
     } catch (applyError: unknown) {
       setError(applyError);
@@ -167,11 +220,115 @@ export function SettingsWorkspace({
     }
   }
 
+  async function updateDesktopPref(patch: Partial<DesktopPreferences>) {
+    const next = { ...desktopPrefs, ...patch };
+    setDesktopPrefs(next);
+    setPrefsSaving(true);
+    setError(undefined);
+    try {
+      const saved = await saveDesktopPreferences(next);
+      setDesktopPrefs(saved);
+      window.dispatchEvent(new CustomEvent("ai-studio:desktop-prefs-changed", { detail: saved }));
+      window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: "单机运行偏好已保存并实时生效", tone: "success" } }));
+    } catch (saveError: unknown) {
+      setError(saveError);
+    } finally {
+      setPrefsSaving(false);
+    }
+  }
+
+  async function refreshStorageSummary() {
+    setStorageBusy(true);
+    try {
+      setStorageSummary(await getStorageSummary());
+    } catch (storageError: unknown) {
+      setError(storageError);
+    } finally {
+      setStorageBusy(false);
+    }
+  }
+
+  async function handlePickDataRoot() {
+    setMigrateConfirmOpen(false);
+    setStorageBusy(true);
+    setError(undefined);
+    try {
+      const report = await pickAndSetDataRoot(true);
+      if (report) {
+        setNotice(
+          `已安排迁移到 ${report.targetPath}。当前仍使用原目录，关闭应用后，下次启动前会复制最新数据并切换；原目录完整保留。`,
+        );
+        window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: "已安排下次启动前迁移数据", tone: "success" } }));
+        await refreshStorageSummary();
+      }
+    } catch (pickError: unknown) {
+      setError(pickError);
+    } finally {
+      setStorageBusy(false);
+    }
+  }
+
+  async function handleResetDataRoot() {
+    setStorageBusy(true);
+    setError(undefined);
+    try {
+      await resetDataRoot();
+      setNotice("已恢复默认数据目录配置，重启 AI Studio 后生效。");
+      await refreshStorageSummary();
+    } catch (resetError: unknown) {
+      setError(resetError);
+    } finally {
+      setStorageBusy(false);
+    }
+  }
+
+  async function handleWalCheckpoint() {
+    setStorageBusy(true);
+    setError(undefined);
+    try {
+      await checkpointDatabaseWal();
+      setNotice("数据库 WAL 日志已安全合并压缩。");
+      await refreshStorageSummary();
+    } catch (walError: unknown) {
+      setError(walError);
+    } finally {
+      setStorageBusy(false);
+    }
+  }
+
+  async function handleCleanupRejectedVideos() {
+    if (!projectId) return;
+    setCleanupConfirmOpen(false);
+    setStorageBusy(true);
+    setError(undefined);
+    try {
+      const report = await cleanupRejectedVideos(projectId);
+      setNotice(
+        report.deletedCount > 0
+          ? `已安全清理 ${report.deletedCount} 个已退回废片，释放约 ${formatFileSize(report.freedBytes)}${report.skippedInUse > 0 ? `（另有 ${report.skippedInUse} 个仍在引用中已自动跳过）` : ""}。`
+          : report.skippedInUse > 0
+            ? `已退回的 ${report.skippedInUse} 个视频仍在镜头引用中，已自动保护跳过。`
+            : "当前项目没有可清理的已退回废片视频。",
+      );
+      await refreshStorageSummary();
+    } catch (cleanupError: unknown) {
+      setError(cleanupError);
+    } finally {
+      setStorageBusy(false);
+    }
+  }
+
   async function testProfile(profile: ComfyEnvironmentProfile) {
     setProfileTestingId(profile.id);
     setProfileTestErrors((current) => ({ ...current, [profile.id]: "" }));
     try {
-      const result = await testComfyConnection(profile.endpoint);
+      const profileOptions = profile.authHeader || profile.allowSystemProxy
+        ? { ...(profile.authHeader ? { authHeader: profile.authHeader } : {}), allowSystemProxy: Boolean(profile.allowSystemProxy) }
+        : undefined;
+      const result = profileOptions ? await testComfyConnection(
+        profile.endpoint,
+        profileOptions,
+      ) : await testComfyConnection(profile.endpoint);
       setProfileTests((current) => ({ ...current, [profile.id]: result }));
     } catch (testError: unknown) {
       setProfileTests((current) => ({ ...current, [profile.id]: undefined }));
@@ -201,6 +358,8 @@ export function SettingsWorkspace({
         id: editingProfileId ?? newProfileId(),
         name,
         endpoint,
+        ...(profileAuthDraft.trim() ? { authHeader: profileAuthDraft.trim() } : {}),
+        allowSystemProxy: profileProxyDraft,
         createdAt: environmentProfiles.find((profile) => profile.id === editingProfileId)?.createdAt ?? now,
         updatedAt: now,
       });
@@ -208,6 +367,8 @@ export function SettingsWorkspace({
       setEditingProfileId(saved.id);
       setProfileNameDraft(saved.name);
       setProfileEndpointDraft(saved.endpoint);
+      setProfileAuthDraft("");
+      setProfileProxyDraft(Boolean(saved.allowSystemProxy));
       setNotice("ComfyUI 环境已保存。");
     } catch (saveError: unknown) {
       setError(saveError);
@@ -216,8 +377,14 @@ export function SettingsWorkspace({
     }
   }
 
-  async function deleteEnvironmentProfile(profile: ComfyEnvironmentProfile) {
-    if (typeof globalThis.confirm === "function" && !globalThis.confirm(`删除环境“${profile.name}”？`)) return;
+  function requestDeleteEnvironmentProfile(profile: ComfyEnvironmentProfile) {
+    setDeleteProfileTarget(profile);
+  }
+
+  async function confirmDeleteEnvironmentProfile() {
+    const profile = deleteProfileTarget;
+    if (!profile) return;
+    setDeleteProfileTarget(undefined);
     setProfileDeletingId(profile.id);
     setError(undefined);
     setNotice(undefined);
@@ -241,6 +408,8 @@ export function SettingsWorkspace({
       const next = await applyComfyEnvironmentProfile(profile.id);
       setSettings(next);
       setEndpointDraft(next.endpoint);
+      setAuthTokenDraft("");
+      setAllowSystemProxyDraft(Boolean(next.allowSystemProxy));
       setEndpointTest(undefined);
       setNotice(`已切换到 ${profile.name}。`);
       window.dispatchEvent(new CustomEvent("ai-studio:toast", { detail: { message: `已切换到 ${profile.name}`, tone: "success" } }));
@@ -269,6 +438,8 @@ export function SettingsWorkspace({
     setEditingProfileId(profile.id);
     setProfileNameDraft(profile.name);
     setProfileEndpointDraft(profile.endpoint);
+    setProfileAuthDraft("");
+    setProfileProxyDraft(Boolean(profile.allowSystemProxy));
     setNotice(undefined);
   }
 
@@ -276,6 +447,8 @@ export function SettingsWorkspace({
     setEditingProfileId(undefined);
     setProfileNameDraft("");
     setProfileEndpointDraft("");
+    setProfileAuthDraft("");
+    setProfileProxyDraft(false);
   }
 
   async function exportBundle() {
@@ -336,6 +509,8 @@ export function SettingsWorkspace({
       <nav className="settings-quick-anchors" aria-label="设置快捷定位">
         <a href="#comfy-endpoint">ComfyUI 连接配置</a>
         <a href="#settings-preflight-title">运行预检</a>
+        <a href="#settings-desktop-prefs-title">单机生产偏好</a>
+        <a href="#settings-storage-title">存储与空间管理</a>
         <a href="#settings-environment-profiles-title">多环境档案</a>
         <a href="#comfy-memory-release-title">显存与内存释放</a>
       </nav>
@@ -375,18 +550,43 @@ export function SettingsWorkspace({
           <div className="settings-endpoint-row">
             <input
               id="comfy-endpoint"
-              value={endpointDraft || settings?.endpoint || comfy?.endpoint || ""}
+              value={endpointDraft}
               onChange={(event) => setEndpointDraft(event.target.value)}
-              placeholder="http://127.0.0.1:8188"
+              placeholder={settings?.endpoint || comfy?.endpoint || "http://127.0.0.1:8188 或 https://gpu.example.com/comfy"}
               spellCheck={false}
               disabled={endpointTesting || endpointApplying}
             />
             <button type="button" onClick={() => void testEndpoint()} disabled={endpointTesting || endpointApplying || !endpointDraft.trim()}>
               {endpointTesting ? "正在测试……" : "测试连接"}
             </button>
-            <button type="button" className="primary-action" onClick={() => void applyEndpoint()} disabled={endpointTesting || endpointApplying || !endpointDraft.trim()}>
+            <button type="button" className="primary-action" onClick={() => void applyEndpoint(false)} disabled={endpointTesting || endpointApplying || !endpointDraft.trim()}>
               {endpointApplying ? "正在保存……" : "保存并应用"}
             </button>
+          </div>
+          <div className="settings-endpoint-row settings-remote-auth-row">
+            <input
+              aria-label="云端或反代认证令牌（可选）"
+              type="password"
+              value={authTokenDraft}
+              onChange={(event) => setAuthTokenDraft(event.target.value)}
+              placeholder={settings?.authConfigured ? "已保存认证令牌（留空保持不变，输入新令牌可覆盖）" : "认证令牌 / Bearer Token（本地 ComfyUI 留空即可）"}
+              spellCheck={false}
+              disabled={endpointTesting || endpointApplying}
+            />
+            {settings?.authConfigured && (
+              <button type="button" className="quiet-button" onClick={() => void applyEndpoint(true)} disabled={endpointTesting || endpointApplying}>
+                清除令牌
+              </button>
+            )}
+            <label className="settings-inline-check">
+              <input
+                type="checkbox"
+                checked={allowSystemProxyDraft}
+                disabled={endpointTesting || endpointApplying}
+                onChange={(event) => setAllowSystemProxyDraft(event.target.checked)}
+              />
+              允许使用系统代理（云算力反代可用）
+            </label>
           </div>
           <details className="settings-quiet-help"><summary>ⓘ 连接测试说明</summary>
             <p>测试连接仅测试当前输入的地址，不会保存或应用这个地址。</p>
@@ -417,14 +617,96 @@ export function SettingsWorkspace({
         {preflight && <PreflightReportView report={preflight} />}
       </section>
 
+      <section className="settings-card" aria-labelledby="settings-desktop-prefs-title">
+        <div className="settings-card-heading">
+          <div>
+            <h3 id="settings-desktop-prefs-title">单机生产与桌面偏好</h3>
+            <p>控制长时间批量生成时的显存释放与任务完成提醒。</p>
+          </div>
+        </div>
+        <div className="settings-pref-list">
+          <label className="settings-inline-check">
+            <input
+              type="checkbox"
+              checked={desktopPrefs.autoFreeVramBetweenItems}
+              disabled={prefsSaving}
+              onChange={(event) => void updateDesktopPref({ autoFreeVramBetweenItems: event.target.checked })}
+            />
+            批量队列中每个镜头完成后自动请求 ComfyUI 释放显存（适合通宵跑大图/视频防 OOM）
+          </label>
+          <label className="settings-inline-check">
+            <input
+              type="checkbox"
+              checked={desktopPrefs.desktopNotifications}
+              disabled={prefsSaving}
+              onChange={(event) => void updateDesktopPref({ desktopNotifications: event.target.checked })}
+            />
+            窗口在后台时，视频生成完成或失败发送系统桌面通知
+          </label>
+          <label className="settings-pref-row">
+            <span>瞬态故障（OOM / 超时 / 瞬断）自动重试次数</span>
+            <select
+              aria-label="瞬态故障自动重试次数"
+              value={desktopPrefs.transientRetryLimit}
+              disabled={prefsSaving}
+              onChange={(event) => void updateDesktopPref({ transientRetryLimit: Number(event.target.value) })}
+            >
+              <option value={0}>不自动重试（推荐手动排查）</option>
+              <option value={1}>自动清显存后重试 1 次</option>
+              <option value={2}>自动清显存后重试最多 2 次</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section className="settings-card" aria-labelledby="settings-storage-title">
+        <div className="settings-card-heading">
+          <div>
+            <h3 id="settings-storage-title">存储与数据管理</h3>
+            <p>所有项目、提示词、参考图与视频均保存在本机数据目录；可随时迁移到非系统盘或清理已退回废片。</p>
+          </div>
+          <button type="button" className="quiet-button" onClick={() => void refreshStorageSummary()} disabled={storageBusy}>
+            {storageBusy ? "统计中……" : "刷新空间统计"}
+          </button>
+        </div>
+        {storageSummary && (
+          <dl className="settings-list settings-storage-grid">
+            <div><dt>当前数据目录</dt><dd>{storageSummary.currentDataRoot}</dd></div>
+            <div><dt>磁盘可用空间</dt><dd>{storageSummary.freeBytes != null ? `${formatFileSize(storageSummary.freeBytes)} 可用${storageSummary.totalBytes != null ? ` / ${formatFileSize(storageSummary.totalBytes)}` : ""}` : "--"}</dd></div>
+            <div><dt>项目素材总计</dt><dd>{formatFileSize(storageSummary.projectsTotalBytes)}（{storageSummary.projects.length} 个项目）</dd></div>
+            <div><dt>数据库 / 日志</dt><dd>{formatFileSize(storageSummary.databaseBytes)} / {formatFileSize(storageSummary.logsBytes)}</dd></div>
+          </dl>
+        )}
+        {storageSummary?.pendingMigrationTarget && <p className="settings-notice" role="status">待迁移目录：{storageSummary.pendingMigrationTarget}。关闭应用后，下次启动前执行迁移，原目录保留。</p>}
+        {storageSummary?.persistedCustomRoot && !storageSummary.envOverrideActive && (
+          <p className="settings-notice" role="status">当前自定义数据目录：{storageSummary.persistedCustomRoot}</p>
+        )}
+        <div className="settings-actions">
+          <button type="button" onClick={() => void openStorageDirectory("data")}>打开数据目录</button>
+          <button type="button" onClick={() => void openStorageDirectory("logs")}>打开日志目录</button>
+          <button type="button" onClick={() => void openStorageDirectory("backups")}>打开数据库备份目录</button>
+          <button type="button" onClick={() => setMigrateConfirmOpen(true)} disabled={storageBusy || Boolean(storageSummary?.envOverrideActive)}>一键迁移数据目录（迁出 C 盘）</button>
+          {storageSummary?.persistedCustomRoot && !storageSummary.envOverrideActive && (
+            <button type="button" className="quiet-button" onClick={() => void handleResetDataRoot()} disabled={storageBusy}>恢复默认目录</button>
+          )}
+          <button type="button" className="quiet-button" onClick={() => void handleWalCheckpoint()} disabled={storageBusy}>整理数据库日志</button>
+          {projectId && (
+            <button type="button" className="danger-button" onClick={() => setCleanupConfirmOpen(true)} disabled={storageBusy}>
+              清理当前项目已退回废片
+            </button>
+          )}
+        </div>
+      </section>
+
       <div className="settings-grid">
         <section className="settings-card" aria-labelledby="settings-app-info">
-          <h3 id="settings-app-info">应用信息</h3>
+          <h3 id="settings-app-info">应用信息与隐私</h3>
           <dl className="settings-list">
             <div><dt>应用版本</dt><dd>{summary?.appVersion ?? "未知"}</dd></div>
             <div><dt>运行平台</dt><dd>{summary ? `${summary.platform} · ${summary.architecture}` : "未知"}</dd></div>
-            <div><dt>运行模式</dt><dd>{summary?.runMode ?? "未知"}</dd></div>
+            <div><dt>运行模式</dt><dd>纯单机离线优先（{summary?.runMode ?? "local"}）</dd></div>
           </dl>
+          <p className="settings-privacy-note">所有项目数据、提示词、参考图与生成成片均保存在本地磁盘，不上传云端、无需账号与在线授权；数据库升级前会自动在 backups 目录保留回滚快照。</p>
         </section>
 
         <section className="settings-card" aria-labelledby="settings-runtime-info">
@@ -466,7 +748,11 @@ export function SettingsWorkspace({
                     <div className="settings-card-heading">
                       <div>
                         <h4>{profile.name}</h4>
-                        <p>{profile.endpoint}</p>
+                        <p>
+                          {profile.endpoint}
+                          {profile.authHeader ? " · 已配令牌" : ""}
+                          {profile.allowSystemProxy ? " · 使用代理" : ""}
+                        </p>
                       </div>
                       {isCurrent && <span className="status-pill comfy-connected">当前环境</span>}
                     </div>
@@ -478,7 +764,7 @@ export function SettingsWorkspace({
                         {profileSaving ? "正在应用……" : "应用"}
                       </button>
                       <button type="button" className="quiet-button" onClick={() => editEnvironmentProfile(profile)} disabled={profileSaving || profileDeletingId === profile.id}>编辑</button>
-                      <button type="button" className="quiet-button" onClick={() => void deleteEnvironmentProfile(profile)} disabled={profileSaving || profileDeletingId === profile.id}>
+                      <button type="button" className="quiet-button" onClick={() => requestDeleteEnvironmentProfile(profile)} disabled={profileSaving || profileDeletingId === profile.id}>
                         {profileDeletingId === profile.id ? "正在删除……" : "删除"}
                       </button>
                     </div>
@@ -491,8 +777,13 @@ export function SettingsWorkspace({
           )}
           {!profilesLoading && !environmentProfiles.length && <p>还没有保存的 ComfyUI 环境。</p>}
           <div className="settings-endpoint-row">
-            <input aria-label="环境名称" value={profileNameDraft} onChange={(event) => setProfileNameDraft(event.target.value)} maxLength={80} placeholder="环境名称，例如：本地 H3" disabled={profileSaving} />
-            <input aria-label="环境 ComfyUI 地址" value={profileEndpointDraft} onChange={(event) => setProfileEndpointDraft(event.target.value)} placeholder="http://127.0.0.1:8188" spellCheck={false} disabled={profileSaving} />
+            <input aria-label="环境名称" value={profileNameDraft} onChange={(event) => setProfileNameDraft(event.target.value)} maxLength={80} placeholder="环境名称，例如：云端 4090 / 本地 H3" disabled={profileSaving} />
+            <input aria-label="环境 ComfyUI 地址" value={profileEndpointDraft} onChange={(event) => setProfileEndpointDraft(event.target.value)} placeholder="http://127.0.0.1:8188 或 https://gpu.example.com/comfy" spellCheck={false} disabled={profileSaving} />
+            <input aria-label="环境认证令牌（可选）" type="password" value={profileAuthDraft} onChange={(event) => setProfileAuthDraft(event.target.value)} placeholder="认证令牌（可选）" spellCheck={false} disabled={profileSaving} />
+            <label className="settings-inline-check">
+              <input type="checkbox" checked={profileProxyDraft} onChange={(event) => setProfileProxyDraft(event.target.checked)} disabled={profileSaving} />
+              代理
+            </label>
             <button type="button" className="primary-action" onClick={() => void saveEnvironmentProfile()} disabled={profileSaving || environmentProfiles.length >= 20 && !editingProfileId}>
               {profileSaving ? "正在保存……" : editingProfileId ? "更新环境" : "保存环境"}
             </button>
@@ -521,6 +812,32 @@ export function SettingsWorkspace({
       </section>
 
       {showWorkflowRepairStatus && <RepairJobsStatusSection />}
+      <ThemedConfirmDialog
+        open={Boolean(deleteProfileTarget)}
+        title="删除 ComfyUI 环境"
+        message={deleteProfileTarget ? `确定删除已保存环境“${deleteProfileTarget.name}”吗？` : ""}
+        confirmLabel="确认删除"
+        danger
+        onConfirm={() => void confirmDeleteEnvironmentProfile()}
+        onCancel={() => setDeleteProfileTarget(undefined)}
+      />
+      <ThemedConfirmDialog
+        open={migrateConfirmOpen}
+        title="一键迁移数据目录（迁出 C 盘）"
+        message="选择尚不存在 AIStudioData 的目标位置。当前可以继续工作；关闭应用后，下次启动前会复制最新数据库、素材、工作流和配置，验证成功后切换。原目录完整保留。"
+        confirmLabel="选择目标并安排迁移"
+        onConfirm={() => void handlePickDataRoot()}
+        onCancel={() => setMigrateConfirmOpen(false)}
+      />
+      <ThemedConfirmDialog
+        open={cleanupConfirmOpen}
+        title="清理已退回废片视频"
+        message="将永久删除当前项目中审核状态为「已退回」且未被任何镜头选用的视频文件以释放磁盘空间。正在使用的视频和已选用成片会自动保留。"
+        confirmLabel="确认清理"
+        danger
+        onConfirm={() => void handleCleanupRejectedVideos()}
+        onCancel={() => setCleanupConfirmOpen(false)}
+      />
     </section>
   );
 }

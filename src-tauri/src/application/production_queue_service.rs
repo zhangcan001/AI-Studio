@@ -269,6 +269,11 @@ pub struct ProductionPartialResumeResult {
     pub existing_retry_item_ids: Vec<String>,
 }
 
+#[async_trait::async_trait]
+pub trait ProductionRetryAdmission: Send + Sync {
+    async fn start_retry(&self, project_id: &str, batch_id: &str) -> Result<(), String>;
+}
+
 pub struct ProductionQueueService {
     repository: Arc<dyn ProductionQueueRepository>,
     task_repository: Arc<dyn TaskRepository>,
@@ -285,6 +290,71 @@ pub struct ProductionQueueService {
     deferred_start_notify: Arc<Notify>,
     new_generation_admission: Option<Arc<dyn NewGenerationAdmission>>,
     task_cancellation: Option<Arc<TaskCancellationService>>,
+    retry_admission: Arc<std::sync::OnceLock<std::sync::Weak<dyn ProductionRetryAdmission>>>,
+    auto_free_vram: Arc<
+        std::sync::OnceLock<(
+            Arc<dyn crate::application::ports::ComfyAdapter>,
+            Arc<dyn Fn() -> crate::application::ports::DesktopPreferences + Send + Sync>,
+        )>,
+    >,
+}
+
+fn is_transient_queue_failure(code: Option<&str>, message: Option<&str>) -> bool {
+    if matches!(
+        code,
+        Some(
+            "SUBMISSION_STATE_UNCERTAIN" | "QUEUE_DISPATCH_UNCERTAIN" | "COMFY_STREAM_DISCONNECTED"
+        )
+    ) {
+        return false;
+    }
+    if let Some(code) = code {
+        if matches!(
+            code,
+            "COMFY_OFFLINE" | "COMFY_TIMEOUT" | "COMFY_EXECUTION_TIMEOUT" | "COMFY_OOM"
+        ) {
+            return true;
+        }
+    }
+    if code.is_some_and(|code| code != "EXECUTION_ERROR") {
+        return false;
+    }
+    if let Some(message) = message {
+        let lower = message.to_ascii_lowercase();
+        if lower.contains("out of memory")
+            || lower.contains("cuda error")
+            || lower
+                .split(|c: char| !c.is_alphanumeric())
+                .any(|word| word == "oom")
+            || lower.contains("timed out")
+            || lower.contains("timeout")
+            || lower.contains("connection reset")
+            || lower.contains("broken pipe")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn retry_chain_depth(items: &[ProductionBatchItem], item_id: &str) -> usize {
+    let mut depth = 0usize;
+    let mut current = item_id;
+    let mut visited = HashSet::new();
+    while visited.insert(current) {
+        let Some(item) = items
+            .iter()
+            .find(|candidate| candidate.id.as_str() == current)
+        else {
+            break;
+        };
+        let Some(parent) = item.retry_of_item_id.as_deref() else {
+            break;
+        };
+        depth += 1;
+        current = parent;
+    }
+    depth
 }
 
 impl ProductionQueueService {
@@ -313,7 +383,21 @@ impl ProductionQueueService {
             deferred_start_notify: Arc::new(Notify::new()),
             new_generation_admission: None,
             task_cancellation: None,
+            retry_admission: Arc::new(std::sync::OnceLock::new()),
+            auto_free_vram: Arc::new(std::sync::OnceLock::new()),
         }
+    }
+
+    pub fn set_retry_admission(&self, admission: std::sync::Weak<dyn ProductionRetryAdmission>) {
+        let _ = self.retry_admission.set(admission);
+    }
+
+    pub fn set_desktop_preferences_hook(
+        &self,
+        adapter: Arc<dyn crate::application::ports::ComfyAdapter>,
+        prefs: Arc<dyn Fn() -> crate::application::ports::DesktopPreferences + Send + Sync>,
+    ) {
+        let _ = self.auto_free_vram.set((adapter, prefs));
     }
 
     pub fn with_task_cancellation(mut self, cancellation: Arc<TaskCancellationService>) -> Self {
@@ -1770,6 +1854,8 @@ impl ProductionQueueService {
             deferred_start_notify: Arc::clone(&self.deferred_start_notify),
             new_generation_admission: self.new_generation_admission.clone(),
             task_cancellation: self.task_cancellation.clone(),
+            retry_admission: Arc::clone(&self.retry_admission),
+            auto_free_vram: Arc::clone(&self.auto_free_vram),
         }
     }
 
@@ -2176,8 +2262,19 @@ impl ProductionQueueService {
         item_id: &str,
         require_safe_source: bool,
     ) -> Result<ProductionBatchDetail, ProductionQueueError> {
-        let batch_id = parse_batch_id(batch_id)?;
         let _admission = Arc::clone(&self.admission_gate).lock_owned().await;
+        self.requeue_item_admitted(project_id, batch_id, item_id, require_safe_source)
+            .await
+    }
+
+    async fn requeue_item_admitted(
+        &self,
+        project_id: &str,
+        batch_id: &str,
+        item_id: &str,
+        require_safe_source: bool,
+    ) -> Result<ProductionBatchDetail, ProductionQueueError> {
+        let batch_id = parse_batch_id(batch_id)?;
         let detail = self
             .repository
             .find_detail(project_id, &batch_id)
@@ -2555,12 +2652,31 @@ impl ProductionQueueService {
                 };
                 if let Some((status, code, message)) = terminal {
                     let already_paused = detail.batch.status == ProductionBatchStatus::Paused;
+                    let prefs = self
+                        .auto_free_vram
+                        .get()
+                        .map(|(_, get)| get())
+                        .unwrap_or_default();
+                    let retry_depth = retry_chain_depth(&detail.items, active.id.as_str());
+                    let retry_candidate = status == ProductionBatchItemStatus::Failed
+                        && !already_paused
+                        && retry_depth < usize::from(prefs.transient_retry_limit)
+                        && is_transient_queue_failure(
+                            task.error.as_ref().map(|e| e.code.as_str()),
+                            message,
+                        )
+                        && self
+                            .retry_admission
+                            .get()
+                            .and_then(|a| a.upgrade())
+                            .is_some();
                     let pause_batch = !already_paused
-                        && should_pause_after_terminal(
-                            status,
-                            code,
-                            detail.batch.continue_on_failure,
-                        );
+                        && (retry_candidate
+                            || should_pause_after_terminal(
+                                status,
+                                code,
+                                detail.batch.continue_on_failure,
+                            ));
                     self.finish_item_and_settle_batch(
                         &detail,
                         TerminalItemTransition {
@@ -2576,8 +2692,68 @@ impl ProductionQueueService {
                         .lock()
                         .expect("production recovery task registry mutex poisoned")
                         .remove(task_id.as_str());
-                    if already_paused || pause_batch {
+                    let mut auto_retried = false;
+                    if retry_candidate {
+                        let expected = self.get(project_id, batch_id.as_str()).await?;
+                        if expected.batch.status == ProductionBatchStatus::Paused
+                            && expected.batch.archived_at.is_none()
+                        {
+                            if let Some((adapter, _)) = self.auto_free_vram.get() {
+                                let _ = adapter.free_memory(true, true).await;
+                            }
+                            sleep(Duration::from_secs(3)).await;
+                            let prepared = {
+                                let _admission =
+                                    Arc::clone(&self.admission_gate).lock_owned().await;
+                                let current = self.get(project_id, batch_id.as_str()).await?;
+                                if current != expected
+                                    || retry_depth
+                                        >= usize::from(
+                                            self.auto_free_vram
+                                                .get()
+                                                .map(|(_, get)| get().transient_retry_limit)
+                                                .unwrap_or(0),
+                                        )
+                                {
+                                    false
+                                } else {
+                                    self.requeue_item_admitted(
+                                        project_id,
+                                        batch_id.as_str(),
+                                        active.id.as_str(),
+                                        false,
+                                    )
+                                    .await
+                                    .is_ok()
+                                }
+                            };
+                            if prepared {
+                                if let Some(admission) =
+                                    self.retry_admission.get().and_then(|a| a.upgrade())
+                                {
+                                    match admission.start_retry(project_id, batch_id.as_str()).await
+                                    {
+                                        Ok(()) => auto_retried = true,
+                                        Err(reason) => {
+                                            tracing::warn!(%reason, "automatic retry blocked by runtime admission")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if already_paused || (pause_batch && !auto_retried) {
                         return Ok(());
+                    }
+                    let has_more = auto_retried
+                        || detail
+                            .items
+                            .iter()
+                            .any(|i| i.status == ProductionBatchItemStatus::Pending);
+                    if has_more && prefs.auto_free_vram_between_items {
+                        if let Some((adapter, _)) = self.auto_free_vram.get() {
+                            let _ = adapter.free_memory(true, true).await;
+                        }
                     }
                     continue;
                 }
@@ -4764,5 +4940,28 @@ mod tests {
             },
             batch,
         }
+    }
+    #[test]
+    fn automatic_retry_never_replays_an_uncertain_submission() {
+        assert!(!super::is_transient_queue_failure(
+            Some("NODE_INCOMPATIBLE"),
+            Some("CUDA out of memory")
+        ));
+        assert!(!super::is_transient_queue_failure(
+            Some("EXECUTION_ERROR"),
+            Some("bloom input is invalid")
+        ));
+        assert!(!super::is_transient_queue_failure(
+            Some("SUBMISSION_STATE_UNCERTAIN"),
+            Some("timeout while submitting")
+        ));
+        assert!(!super::is_transient_queue_failure(
+            Some("QUEUE_DISPATCH_UNCERTAIN"),
+            Some("connection reset")
+        ));
+        assert!(super::is_transient_queue_failure(
+            Some("COMFY_OOM"),
+            Some("CUDA out of memory")
+        ));
     }
 }

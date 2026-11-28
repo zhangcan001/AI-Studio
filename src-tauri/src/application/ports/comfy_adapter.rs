@@ -17,6 +17,9 @@ pub struct ComfyConnectionConfig {
     pub protocol: String,
     pub host: String,
     pub port: u16,
+    pub base_path: String,
+    pub auth_header: Option<String>,
+    pub allow_system_proxy: bool,
 }
 
 impl ComfyConnectionConfig {
@@ -25,11 +28,33 @@ impl ComfyConnectionConfig {
             protocol: protocol.into(),
             host: host.into(),
             port,
+            base_path: String::new(),
+            auth_header: None,
+            allow_system_proxy: false,
         }
     }
 
+    pub fn with_auth_header(mut self, auth_header: Option<String>) -> Self {
+        self.auth_header = auth_header
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        self
+    }
+
+    pub fn with_system_proxy(mut self, allow: bool) -> Self {
+        self.allow_system_proxy = allow;
+        self
+    }
+
     pub fn endpoint(&self) -> String {
-        format!("{}://{}:{}", self.protocol, self.host, self.port)
+        if self.base_path.is_empty() {
+            format!("{}://{}:{}", self.protocol, self.host, self.port)
+        } else {
+            format!(
+                "{}://{}:{}{}",
+                self.protocol, self.host, self.port, self.base_path
+            )
+        }
     }
 
     pub fn route_url(&self, route: &str) -> String {
@@ -47,8 +72,8 @@ impl ComfyConnectionConfig {
             other => other,
         };
         format!(
-            "{protocol}://{}:{}/ws?clientId={client_id}",
-            self.host, self.port
+            "{protocol}://{}:{}{}/ws?clientId={client_id}",
+            self.host, self.port, self.base_path
         )
     }
 
@@ -74,11 +99,24 @@ impl ComfyConnectionConfig {
                 "ComfyUI 地址不能包含查询参数或片段".to_owned(),
             ));
         }
-        if !parsed.path().is_empty() && parsed.path() != "/" {
-            return Err(ComfyEndpointError::invalid(
-                "ComfyUI 地址不能包含 API 路径".to_owned(),
-            ));
-        }
+        let raw_path = parsed.path().trim_end_matches('/');
+        let base_path = if raw_path.is_empty() {
+            String::new()
+        } else {
+            if raw_path
+                .split('/')
+                .any(|segment| segment == ".." || segment.chars().any(char::is_control))
+            {
+                return Err(ComfyEndpointError::invalid(
+                    "ComfyUI 路径前缀包含非法字符".to_owned(),
+                ));
+            }
+            if raw_path.starts_with('/') {
+                raw_path.to_owned()
+            } else {
+                format!("/{raw_path}")
+            }
+        };
         let host = parsed
             .host_str()
             .filter(|host| !host.trim().is_empty())
@@ -91,7 +129,9 @@ impl ComfyConnectionConfig {
         } else {
             host.to_owned()
         };
-        Ok(Self::new(parsed.scheme(), host, port))
+        let mut config = Self::new(parsed.scheme(), host, port);
+        config.base_path = base_path;
+        Ok(config)
     }
 }
 

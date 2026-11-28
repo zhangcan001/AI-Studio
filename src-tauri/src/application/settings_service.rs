@@ -47,6 +47,8 @@ impl RuntimeConfigurationAdmission for ProductionQueueService {
 pub struct SettingsView {
     pub schema_version: u32,
     pub endpoint: String,
+    pub auth_configured: bool,
+    pub allow_system_proxy: bool,
     pub warning: Option<String>,
 }
 
@@ -105,12 +107,79 @@ impl SettingsService {
         SettingsView {
             schema_version: settings.schema_version,
             endpoint: settings.comfy.endpoint.clone(),
+            auth_configured: settings
+                .comfy
+                .auth_header
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty()),
+            allow_system_proxy: settings.comfy.allow_system_proxy,
             warning: self
                 .warning
                 .read()
                 .unwrap_or_else(|error| error.into_inner())
                 .clone(),
         }
+    }
+
+    pub fn window_state(&self) -> Option<crate::application::ports::WindowGeometry> {
+        self.settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .window_state
+            .clone()
+    }
+
+    pub async fn save_window_state(
+        &self,
+        window_state: crate::application::ports::WindowGeometry,
+    ) -> Result<(), AppError> {
+        let _mutation = self.mutation.lock().await;
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        next_settings.window_state = Some(window_state);
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(())
+    }
+
+    pub fn desktop_preferences(&self) -> crate::application::ports::DesktopPreferences {
+        self.settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .desktop_preferences
+            .clone()
+    }
+
+    pub async fn save_desktop_preferences(
+        &self,
+        mut preferences: crate::application::ports::DesktopPreferences,
+    ) -> Result<crate::application::ports::DesktopPreferences, AppError> {
+        preferences.transient_retry_limit = preferences.transient_retry_limit.min(3);
+        let _mutation = self.mutation.lock().await;
+        let mut next_settings = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        next_settings.desktop_preferences = preferences.clone();
+        self.store
+            .save(&next_settings)
+            .await
+            .map_err(|error| AppError::settings_save_failed(error.message))?;
+        *self
+            .settings
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = next_settings;
+        Ok(preferences)
     }
 
     pub fn preferred_preset(
@@ -333,6 +402,12 @@ impl SettingsService {
         profile.id = profile.id.trim().to_owned();
         profile.name = profile.name.trim().to_owned();
         profile.endpoint = parse_endpoint(&profile.endpoint)?.endpoint();
+        profile.auth_header = profile
+            .auth_header
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(normalize_auth_header);
         profile.created_at = profile.created_at.trim().to_owned();
         profile.updated_at = profile.updated_at.trim().to_owned();
         validate_comfy_environment_profile(&profile)?;
@@ -349,6 +424,9 @@ impl SettingsService {
             .find(|current| current.id == profile.id)
         {
             profile.created_at = existing.created_at.clone();
+            if profile.auth_header.is_none() && profile.endpoint == existing.endpoint {
+                profile.auth_header = existing.auth_header.clone();
+            }
         }
         if next_settings
             .comfy_environment_profiles
@@ -431,16 +509,22 @@ impl SettingsService {
         if profile_id.is_empty() {
             return Err(AppError::invalid_input("ComfyUI 环境档案 ID 不能为空。"));
         }
-        let endpoint = self
+        let profile = self
             .settings
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .comfy_environment_profiles
             .iter()
             .find(|profile| profile.id == profile_id)
-            .map(|profile| profile.endpoint.clone())
+            .cloned()
             .ok_or_else(|| AppError::invalid_input("ComfyUI 环境档案不存在。"))?;
-        self.save_and_apply(&endpoint).await
+        self.save_and_apply_with_options(
+            &profile.endpoint,
+            profile.auth_header.as_deref(),
+            profile.auth_header.is_none(),
+            Some(profile.allow_system_proxy),
+        )
+        .await
     }
 
     pub async fn set_preferred_preset(
@@ -483,7 +567,31 @@ impl SettingsService {
     }
 
     pub async fn test_connection(&self, endpoint: &str) -> Result<EndpointTestView, AppError> {
-        let config = parse_endpoint(endpoint)?;
+        self.test_connection_with_options(endpoint, None, None)
+            .await
+    }
+
+    pub async fn test_connection_with_options(
+        &self,
+        endpoint: &str,
+        auth_header: Option<&str>,
+        allow_system_proxy: Option<bool>,
+    ) -> Result<EndpointTestView, AppError> {
+        let current = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .comfy
+            .clone();
+        let effective_auth = match auth_header.map(str::trim) {
+            Some(value) if !value.is_empty() => Some(normalize_auth_header(value)),
+            _ if parse_endpoint(endpoint)?.endpoint() == current.endpoint => current.auth_header,
+            _ => None,
+        };
+        let effective_proxy = allow_system_proxy.unwrap_or(current.allow_system_proxy);
+        let config = parse_endpoint(endpoint)?
+            .with_auth_header(effective_auth)
+            .with_system_proxy(effective_proxy);
         let adapter = self
             .adapter_factory
             .create(config.clone())
@@ -492,7 +600,38 @@ impl SettingsService {
     }
 
     pub async fn save_and_apply(&self, endpoint: &str) -> Result<SettingsView, AppError> {
-        let config = parse_endpoint(endpoint)?;
+        self.save_and_apply_with_options(endpoint, None, false, None)
+            .await
+    }
+
+    pub async fn save_and_apply_with_options(
+        &self,
+        endpoint: &str,
+        auth_header: Option<&str>,
+        clear_auth_header: bool,
+        allow_system_proxy: Option<bool>,
+    ) -> Result<SettingsView, AppError> {
+        let current_comfy = self
+            .settings
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .comfy
+            .clone();
+        let next_auth = if clear_auth_header {
+            None
+        } else {
+            match auth_header.map(str::trim) {
+                Some(value) if !value.is_empty() => Some(normalize_auth_header(value)),
+                _ if parse_endpoint(endpoint)?.endpoint() == current_comfy.endpoint => {
+                    current_comfy.auth_header.clone()
+                }
+                _ => None,
+            }
+        };
+        let next_proxy = allow_system_proxy.unwrap_or(current_comfy.allow_system_proxy);
+        let config = parse_endpoint(endpoint)?
+            .with_auth_header(next_auth.clone())
+            .with_system_proxy(next_proxy);
         let adapter = self
             .adapter_factory
             .create(config.clone())
@@ -517,53 +656,16 @@ impl SettingsService {
         adapter.health_check().await.map_err(endpoint_test_error)?;
 
         let _mutation = self.mutation.lock().await;
-        let preferred_presets = self
+        let mut next_settings = self
             .settings
             .read()
             .unwrap_or_else(|error| error.into_inner())
-            .preferred_presets
             .clone();
-        let runtime_profiles = self
-            .settings
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .runtime_profiles
-            .clone();
-        let production_queue_name_presets = self
-            .settings
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .production_queue_name_presets
-            .clone();
-        let comfy_environment_profiles = self
-            .settings
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .comfy_environment_profiles
-            .clone();
-        let batch_workflow_presets = self
-            .settings
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .batch_workflow_presets
-            .clone();
-        let workspace_resume = self
-            .settings
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .workspace_resume
-            .clone();
-        let next_settings = AppSettings {
-            schema_version: 1,
-            comfy: crate::application::ports::ComfySettings {
-                endpoint: config.endpoint(),
-            },
-            workspace_resume,
-            preferred_presets,
-            runtime_profiles,
-            production_queue_name_presets,
-            comfy_environment_profiles,
-            batch_workflow_presets,
+        next_settings.schema_version = 1;
+        next_settings.comfy = crate::application::ports::ComfySettings {
+            endpoint: config.endpoint(),
+            auth_header: next_auth,
+            allow_system_proxy: next_proxy,
         };
         self.store
             .save(&next_settings)
@@ -591,6 +693,15 @@ impl SettingsService {
             );
         }
         Ok(self.settings())
+    }
+}
+
+fn normalize_auth_header(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.contains(' ') {
+        trimmed.to_owned()
+    } else {
+        format!("Bearer {trimmed}")
     }
 }
 
@@ -909,6 +1020,8 @@ mod tests {
             id: id.to_owned(),
             name: name.to_owned(),
             endpoint: endpoint.to_owned(),
+            auth_header: None,
+            allow_system_proxy: false,
             created_at: "2026-08-17T00:00:00Z".to_owned(),
             updated_at: "2026-08-17T00:00:00Z".to_owned(),
         }
@@ -1277,5 +1390,109 @@ mod tests {
         assert!(!service
             .production_queue_name_presets()
             .contains(&"第02集 图片".to_owned()));
+    }
+    #[tokio::test]
+    async fn connection_tests_never_reuse_auth_for_a_different_endpoint() {
+        struct RecordingFactory {
+            configs: Arc<Mutex<Vec<ComfyConnectionConfig>>>,
+            adapter: BlockingAdapter,
+        }
+        impl ComfyAdapterFactory for RecordingFactory {
+            fn create(
+                &self,
+                config: ComfyConnectionConfig,
+            ) -> Result<Arc<dyn ComfyAdapter>, ComfyAdapterError> {
+                self.configs.lock().unwrap().push(config);
+                Ok(Arc::new(self.adapter.clone()))
+            }
+        }
+        let adapter = BlockingAdapter::new();
+        adapter.health_calls.store(1, Ordering::SeqCst);
+        let configs = Arc::new(Mutex::new(Vec::new()));
+        let config = ComfyConnectionConfig::default();
+        let runtime = Arc::new(ComfyRuntime::new(Arc::new(adapter.clone()), config));
+        let mut settings = AppSettings::default();
+        settings.comfy.auth_header = Some("Bearer fixture-secret".into());
+        let service = SettingsService::new(
+            Arc::new(MemorySettingsStore::default()),
+            LoadedSettings {
+                settings,
+                warning: None,
+            },
+            runtime.clone(),
+            Arc::new(ComfyService::from_runtime(runtime)),
+            Arc::new(TestActivityProvider {
+                status: Mutex::new(RuntimeActivityStatusView {
+                    active_task_count: 0,
+                    production_busy: false,
+                }),
+            }),
+            Arc::new(TestAdmission {
+                gate: Arc::new(AsyncMutex::new(())),
+            }),
+            Arc::new(RecordingFactory {
+                configs: configs.clone(),
+                adapter,
+            }),
+        );
+        service
+            .test_connection_with_options("http://different:8188", None, None)
+            .await
+            .unwrap();
+        service
+            .test_connection_with_options("http://127.0.0.1:8188", None, None)
+            .await
+            .unwrap();
+        service
+            .save_and_apply_with_options("http://different:8188", None, false, None)
+            .await
+            .unwrap();
+        let configs = configs.lock().unwrap();
+        assert!(configs[0].auth_header.is_none());
+        assert_eq!(
+            configs[1].auth_header.as_deref(),
+            Some("Bearer fixture-secret")
+        );
+        assert!(configs[2].auth_header.is_none());
+    }
+    #[tokio::test]
+    async fn profile_credentials_are_preserved_only_when_the_endpoint_is_unchanged() {
+        let activity = Arc::new(TestActivityProvider {
+            status: Mutex::new(RuntimeActivityStatusView {
+                active_task_count: 0,
+                production_busy: false,
+            }),
+        });
+        let admission = Arc::new(TestAdmission {
+            gate: Arc::new(AsyncMutex::new(())),
+        });
+        let service = test_settings_service(
+            activity,
+            admission,
+            Arc::new(MemorySettingsStore::default()),
+            BlockingAdapter::new(),
+        );
+        let mut first = environment_profile("env-auth", "Scoped auth", "http://first:8188");
+        first.auth_header = Some("fixture-secret".into());
+        let first = service.save_comfy_environment_profile(first).await.unwrap();
+        let mut renamed = first.clone();
+        renamed.name = "Renamed".into();
+        renamed.auth_header = None;
+        let renamed = service
+            .save_comfy_environment_profile(renamed)
+            .await
+            .unwrap();
+        assert_eq!(
+            renamed.auth_header.as_deref(),
+            Some("Bearer fixture-secret")
+        );
+        let mut changed = renamed;
+        changed.endpoint = "http://different:8188".into();
+        changed.auth_header = None;
+        let changed = service
+            .save_comfy_environment_profile(changed)
+            .await
+            .unwrap();
+        assert!(changed.auth_header.is_none());
     }
 }

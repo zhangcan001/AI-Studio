@@ -66,6 +66,18 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
     } catch (e) { if (current(project, ticket)) setError(importError(e)); }
     finally { finish(project, ticket); }
   };
+  const pickPath = async (folderPath: string) => {
+    const project = projectId, ticket = begin("pick"); if (ticket === undefined) return;
+    try {
+      const p = await productClient.folderImport.pickPath(project, folderPath);
+      if (!current(project, ticket)) { discard(p.sessionId); return; }
+      if (session.current) discard(session.current.id);
+      autoInitSession.current = "";
+      setLegacy({selectionRef:"",durationSeconds:6,width:0,height:0});
+      accept(p);
+    } catch (e) { if (current(project, ticket)) setError(importError(e)); }
+    finally { finish(project, ticket); }
+  };
   const rescan = async (overrideLegacy?: FolderImportLegacyDefaults, selectAllValid = false) => {
     if (!ownsPreview || !preview || result) return;
     const project = projectId, ticket = begin("rescan"); if (ticket === undefined) return;
@@ -150,5 +162,5 @@ export function useFolderBatchImportController(projectId: string, onImported: ()
     setSelected(new Set(keys.filter(key => valid.has(key))));
   };
   const selectNewlyValid = () => { selectRows([...selected, ...newlyValid]); setNewlyValid(new Set()); };
-  return { newlyValid, selectNewlyValid, selectRows, legacyMode, autoFolderMode, legacy, setLegacy, generators, preview:ownsPreview?preview:undefined, result:ownsPreview?result:undefined, error:uiProject===projectId?error:undefined, busy:uiProject===projectId?busy:undefined, suffix, setSuffix, selected, toggle, createQueue, setCreateQueue: (value: boolean) => { setCreateQueue(value); if (!value) setAutoStart(false); }, autoStart, setAutoStart, dirty, overQueueLimit, canCommit, pick, rescan, commit };
+  return { newlyValid, selectNewlyValid, selectRows, legacyMode, autoFolderMode, legacy, setLegacy, generators, preview:ownsPreview?preview:undefined, result:ownsPreview?result:undefined, error:uiProject===projectId?error:undefined, busy:uiProject===projectId?busy:undefined, suffix, setSuffix, selected, toggle, createQueue, setCreateQueue: (value: boolean) => { setCreateQueue(value); if (!value) setAutoStart(false); }, autoStart, setAutoStart, dirty, overQueueLimit, canCommit, pick, pickPath, rescan, commit };
 }

@@ -51,3 +51,10 @@ export function packageOptionLabel(generator: GeneratorOption, index: number): s
 export function fieldLabel(field: RecipeField) {
   return ({ prompt: "提示词", negative_prompt: "负向提示词", first_frame: "首帧", last_frame: "尾帧", reference_images: "参考图片", reference_audios: "参考音频", reference_video: "参考视频", reference_videos: "参考视频", duration_seconds: "时长（秒）", width: "宽度", height: "高度" } as Record<string, string>)[field.key] ?? field.label;
 }
+
+/** Resolve only the registry's exact current version + recipe; ordering is not identity. */
+export function currentWorkflowRuntime(item: import("../features/workflows/workflowWorkspaceAdapters").WorkflowWorkspaceQueryItem) {
+  const versionId = item.registry.currentVersionId;
+  const recipeId = item.registry.currentRecipe?.recipeId;
+  return item.runtime.find(row => row.workflowVersionId === versionId && row.recipeId === recipeId);
+}

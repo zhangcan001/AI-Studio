@@ -33,7 +33,9 @@ pub const RUNTIME_ADMISSION_CAPABILITY_UNKNOWN: &str = "RUNTIME_ADMISSION_CAPABI
 pub const RUNTIME_ADMISSION_DIAGNOSTICS: &str = "RUNTIME_ADMISSION_DIAGNOSTICS";
 pub const RUNTIME_ADMISSION_READINESS_BLOCKED: &str = "RUNTIME_ADMISSION_READINESS_BLOCKED";
 pub const RUNTIME_ADMISSION_SNAPSHOT_STALE: &str = "RUNTIME_ADMISSION_SNAPSHOT_STALE";
+pub const RUNTIME_ADMISSION_DISK_SPACE_LOW: &str = "RUNTIME_ADMISSION_DISK_SPACE_LOW";
 const MAX_ADMISSION_SNAPSHOT_RETRIES: usize = 1;
+const MIN_QUEUE_START_FREE_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RuntimeAdmissionFailure {
@@ -105,6 +107,7 @@ pub struct ProductionStartAdmissionService {
     queue: Arc<ProductionQueueService>,
     comfy: Arc<ComfyService>,
     lifecycle: Arc<WorkflowLifecycleService>,
+    data_root: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -200,7 +203,13 @@ impl ProductionStartAdmissionService {
             queue,
             comfy,
             lifecycle,
+            data_root: None,
         }
+    }
+
+    pub fn with_data_root(mut self, data_root: std::path::PathBuf) -> Self {
+        self.data_root = Some(data_root);
+        self
     }
 
     async fn collect_runtime_snapshot(
@@ -313,6 +322,29 @@ impl ProductionStartAdmissionService {
                     .await?
             };
             let pending_pairs = pending_runtime_pairs(&detail.items);
+            if !pending_pairs.is_empty() {
+                if let Some(root) = self.data_root.as_deref() {
+                    if let Some((free_bytes, _)) =
+                        crate::infrastructure::filesystem::disk_space_bytes(root)
+                    {
+                        if free_bytes < MIN_QUEUE_START_FREE_BYTES {
+                            let free_mb = free_bytes / (1024 * 1024);
+                            return Err(ProductionStartAdmissionError::Runtime(
+                                RuntimeAdmissionFailure {
+                                    code: RUNTIME_ADMISSION_DISK_SPACE_LOW,
+                                    workflow_version_id: pending_pairs[0].0.clone(),
+                                    recipe_id: pending_pairs[0].1.clone(),
+                                    reason: format!(
+                                        "本地数据目录所在磁盘剩余空间不足（当前仅剩 {free_mb} MB，启动生产队列至少需要 1024 MB 可用空间）。请先清理已退回废片或迁移数据目录。"
+                                    ),
+                                    missing_nodes: Vec::new(),
+                                    batch_issues: Vec::new(),
+                                },
+                            ));
+                        }
+                    }
+                }
+            }
             let (runtime_generation, lifecycle_snapshot_a) = if pending_pairs.is_empty() {
                 (None, RuntimeAdmissionSnapshot::from_inspections(&[], None))
             } else {
@@ -1113,5 +1145,16 @@ mod tests {
         let snapshot_b = snapshot(initial);
 
         assert_eq!(snapshot_a, snapshot_b);
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::application::production_queue_service::ProductionRetryAdmission
+    for ProductionStartAdmissionService
+{
+    async fn start_retry(&self, project_id: &str, batch_id: &str) -> Result<(), String> {
+        self.start(project_id, batch_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 }

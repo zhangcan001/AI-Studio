@@ -141,8 +141,8 @@ pub use repair_job_repository::{
 };
 pub use repository_error::RepositoryError;
 pub use settings_store::{
-    AppSettings, ComfyEnvironmentProfile, ComfySettings, LoadedSettings, RuntimeParameterProfile,
-    SettingsStore, WorkspaceResume,
+    AppSettings, ComfyEnvironmentProfile, ComfySettings, DesktopPreferences, LoadedSettings,
+    RuntimeParameterProfile, SettingsStore, WindowGeometry, WorkspaceResume,
 };
 pub use shot_batch_repository::{
     ActiveShotBatchBinding, ProductionBatchShotLink, ShotBatchBinding, ShotBatchRepository,

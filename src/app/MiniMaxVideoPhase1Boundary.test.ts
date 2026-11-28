@@ -94,10 +94,15 @@ it('keeps one policy on all production composition and write/dispatch seams',()=
   expect(block).toContain('.with_new_generation_admission(workflow_registry_service.clone())');
  }
  const queue=read('src-tauri/src/application/production_queue_service.rs');
- for(const method of ['create_internal','prepare_queue_values','inspect_start_admitted','commit_start_admitted','partial_resume','requeue_item_internal','run_loop']){
+ for(const method of ['create_internal','prepare_queue_values','inspect_start_admitted','commit_start_admitted','partial_resume','requeue_item_internal','requeue_item_admitted','run_loop']){
   const start=queue.indexOf(`fn ${method}(`);expect(start).toBeGreaterThan(0);
   const block=queue.slice(start).split(/\n    (?:pub )?(?:async )?fn /)[0];
-  expect(block).toMatch(/ensure_new_generation_allowed|prepare_queue_values|inspect_start_admitted/);
+  if(method==='requeue_item_internal'){
+   expect(block).toContain('self.requeue_item_admitted(');
+   expect(block).toContain('.lock_owned().await');
+  }else{
+   expect(block).toMatch(/ensure_new_generation_allowed|prepare_queue_values|inspect_start_admitted/);
+  }
  }
  const batch=read('src-tauri/src/application/shot_batch_service.rs');
  expect(batch).toMatch(/validate_new_items\(&batch\.project_id, items\)\.await\?[\s\S]*?insert_prepared_batch_with_bindings/);

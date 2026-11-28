@@ -2,7 +2,7 @@ use crate::error::AppError;
 use sqlx::{
     migrate::Migrator,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
-    SqlitePool,
+    Connection, Row, SqlitePool,
 };
 use std::{path::Path, time::Duration};
 
@@ -26,6 +26,8 @@ pub async fn initialize(database_path: &Path) -> Result<SqlitePool, AppError> {
     configure_pragmas(&pool).await?;
     tracing::info!("database connected");
 
+    backup_database_before_migration(&pool, database_path).await;
+
     MIGRATOR.run(&pool).await.map_err(|error| {
         tracing::error!(?error, "database migration failed");
         AppError::database("database migration failed")
@@ -33,6 +35,230 @@ pub async fn initialize(database_path: &Path) -> Result<SqlitePool, AppError> {
     tracing::info!("database migration completed");
 
     Ok(pool)
+}
+
+/// Checkpoint and truncate SQLite WAL safely for maintenance/space reclamation.
+pub async fn checkpoint_wal(pool: &SqlitePool) -> Result<(), AppError> {
+    let row = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .fetch_one(pool)
+        .await
+        .map_err(|_| AppError::database("failed to checkpoint SQLite WAL"))?;
+    let busy: i64 = row
+        .try_get(0)
+        .map_err(|_| AppError::database("invalid WAL checkpoint result"))?;
+    if busy != 0 {
+        return Err(AppError::database(
+            "数据库仍有活动读取，WAL 尚未合并完成，请稍后重试。",
+        ));
+    }
+    Ok(())
+}
+
+/// Mature desktop safety net: before running pending SQLx migrations on an existing
+/// database, snapshot `app.db` into `<data_root>/backups/` (retaining the latest 5).
+async fn backup_database_before_migration(pool: &SqlitePool, database_path: &Path) {
+    let Ok(meta) = std::fs::metadata(database_path) else {
+        return;
+    };
+    if !meta.is_file() || meta.len() == 0 {
+        return;
+    }
+    let applied_count: i64 = sqlx::query_scalar(
+        "SELECT CASE WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations') \
+         THEN (SELECT COUNT(*) FROM _sqlx_migrations WHERE success = 1) ELSE 0 END",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+    let total_migrations = MIGRATOR.migrations.len() as i64;
+    if applied_count >= total_migrations {
+        return;
+    }
+    let Some(parent) = database_path.parent() else {
+        return;
+    };
+    let backup_dir = parent.join("backups");
+    if std::fs::create_dir_all(&backup_dir).is_err() {
+        return;
+    }
+    let stamp = uuid::Uuid::new_v4().simple().to_string();
+    let target = backup_dir.join(format!("app.db.pre-migrate-v{applied_count}-{stamp}.bak"));
+    match snapshot_database(pool, &target).await {
+        Ok(()) => prune_old_migration_backups(&backup_dir, 5),
+        Err(error) => tracing::warn!(
+            error_code = error.code(),
+            "pre-migration database backup unavailable"
+        ),
+    }
+}
+
+/// SQLite creates a consistent snapshot including committed WAL pages.
+pub(crate) async fn snapshot_database(
+    pool: &SqlitePool,
+    destination: &Path,
+) -> Result<(), AppError> {
+    sqlx::query("VACUUM INTO ?")
+        .bind(destination.to_string_lossy().as_ref())
+        .execute(pool)
+        .await
+        .map_err(|_| AppError::database("无法创建一致的数据库快照"))?;
+    Ok(())
+}
+
+pub(crate) async fn snapshot_database_file(
+    source: &Path,
+    destination: &Path,
+) -> Result<(), AppError> {
+    let options = SqliteConnectOptions::new()
+        .filename(source)
+        .read_only(true)
+        .busy_timeout(Duration::from_secs(5));
+    let mut connection = sqlx::SqliteConnection::connect_with(&options)
+        .await
+        .map_err(|_| AppError::database("无法打开待迁移数据库"))?;
+    let result = sqlx::query("VACUUM INTO ?")
+        .bind(destination.to_string_lossy().as_ref())
+        .execute(&mut connection)
+        .await
+        .map_err(|_| AppError::database("无法创建迁移数据库快照"));
+    let _ = connection.close().await;
+    result.map(|_| ())
+}
+
+/// Relocate live filesystem pointers in the owned snapshot; historical task provenance stays intact.
+pub(crate) async fn rebase_migration_paths(
+    database: &Path,
+    source: &Path,
+    target: &Path,
+) -> Result<(), AppError> {
+    let options = SqliteConnectOptions::new()
+        .filename(database)
+        .journal_mode(SqliteJournalMode::Delete);
+    let mut connection = sqlx::SqliteConnection::connect_with(&options)
+        .await
+        .map_err(|_| AppError::database("无法打开迁移副本"))?;
+    let result = async {
+        let mut transaction = connection
+            .begin()
+            .await
+            .map_err(|_| AppError::database("无法校验迁移副本"))?;
+        for (table, column) in [
+            ("projects", "root_path"),
+            ("assets", "storage_path"),
+            ("assets", "thumbnail_path"),
+            ("workflow_versions", "package_source_path"),
+            ("workflow_runtime_artifacts", "package_source_path"),
+        ] {
+            let columns = sqlx::query(&format!("PRAGMA table_info({table})"))
+                .fetch_all(&mut *transaction)
+                .await
+                .map_err(|_| AppError::database("迁移副本结构不可用"))?;
+            if !columns
+                .iter()
+                .any(|r| r.try_get::<String, _>("name").ok().as_deref() == Some(column))
+            {
+                continue;
+            }
+            let rows = sqlx::query(&format!(
+                "SELECT rowid AS row_id, {column} AS path FROM {table} WHERE {column} IS NOT NULL"
+            ))
+            .fetch_all(&mut *transaction)
+            .await
+            .map_err(|_| AppError::database("无法读取迁移文件位置"))?;
+            for row in rows {
+                let value: String = row
+                    .try_get("path")
+                    .map_err(|_| AppError::database("迁移文件位置无效"))?;
+                if let Some(next) = relocated_live_path(&value, source, target) {
+                    let next = next.to_string_lossy().into_owned();
+                    let id: i64 = row
+                        .try_get("row_id")
+                        .map_err(|_| AppError::database("迁移副本记录无效"))?;
+                    sqlx::query(&format!("UPDATE {table} SET {column}=? WHERE rowid=?"))
+                        .bind(next)
+                        .bind(id)
+                        .execute(&mut *transaction)
+                        .await
+                        .map_err(|_| AppError::database("无法更新迁移副本文件位置"))?;
+                }
+            }
+        }
+        transaction
+            .commit()
+            .await
+            .map_err(|_| AppError::database("无法提交迁移副本"))?;
+        let integrity: String = sqlx::query_scalar("PRAGMA quick_check")
+            .fetch_one(&mut connection)
+            .await
+            .map_err(|_| AppError::database("迁移数据库校验失败"))?;
+        if integrity != "ok" {
+            return Err(AppError::database("迁移数据库完整性检查未通过"));
+        }
+        Ok(())
+    }
+    .await;
+    let closed = connection
+        .close()
+        .await
+        .map_err(|_| AppError::database("无法关闭迁移副本"));
+    result.and(closed)
+}
+
+fn relocated_live_path(value: &str, source: &Path, target: &Path) -> Option<std::path::PathBuf> {
+    if let Ok(relative) = Path::new(value).strip_prefix(source) {
+        return Some(target.join(relative));
+    }
+    #[cfg(windows)]
+    {
+        fn normalized(value: &str) -> String {
+            let value = value.replace('\\', "/");
+            if let Some(rest) = value.strip_prefix("//?/UNC/") {
+                format!("//{rest}")
+            } else {
+                value.strip_prefix("//?/").unwrap_or(&value).to_owned()
+            }
+        }
+        let value = normalized(value);
+        let prefix = normalized(source.to_string_lossy().as_ref())
+            .trim_end_matches('/')
+            .to_owned();
+        if value.eq_ignore_ascii_case(&prefix) {
+            return Some(target.to_owned());
+        }
+        if value
+            .get(..prefix.len())
+            .is_some_and(|part| part.eq_ignore_ascii_case(&prefix))
+            && value.as_bytes().get(prefix.len()) == Some(&b'/')
+        {
+            return Some(target.join(&value[prefix.len() + 1..]));
+        }
+    }
+    None
+}
+
+fn prune_old_migration_backups(backup_dir: &Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(backup_dir) else {
+        return;
+    };
+    let mut files: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_name().to_str().is_some_and(|name| {
+                name.starts_with("app.db.pre-migrate-") && name.ends_with(".bak")
+            })
+        })
+        .map(|entry| {
+            let modified = entry.metadata().and_then(|meta| meta.modified()).ok();
+            (entry.path(), modified)
+        })
+        .collect();
+    if files.len() <= keep {
+        return;
+    }
+    files.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| right.0.cmp(&left.0)));
+    for (path, _) in files.into_iter().skip(keep) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 async fn configure_pragmas(pool: &SqlitePool) -> Result<(), AppError> {
@@ -1463,5 +1689,63 @@ mod tests {
                 .unwrap();
         assert_eq!(row, ("旧提示词".into(), None, None, None, None));
         pool.close().await;
+    }
+    #[tokio::test]
+    async fn checkpoint_reports_busy_and_snapshot_still_includes_committed_wal() {
+        let temp = tempfile::tempdir().unwrap();
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(temp.path().join("source.db"))
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            .busy_timeout(std::time::Duration::from_millis(20));
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(3)
+            .connect_with(options)
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE evidence(value INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO evidence VALUES (1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        super::checkpoint_wal(&pool).await.unwrap();
+        let mut reader = pool.begin().await.unwrap();
+        let _: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM evidence")
+            .fetch_one(&mut *reader)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO evidence VALUES (2)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(super::checkpoint_wal(&pool).await.is_err());
+        let destination = temp.path().join("snapshot.db");
+        super::snapshot_database(&pool, &destination).await.unwrap();
+        let copy = sqlx::SqlitePool::connect(&format!("sqlite:{}", destination.display()))
+            .await
+            .unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM evidence")
+            .fetch_one(&copy)
+            .await
+            .unwrap();
+        assert_eq!(count, 2);
+        reader.rollback().await.unwrap();
+        super::checkpoint_wal(&pool).await.unwrap();
+        copy.close().await;
+        pool.close().await;
+    }
+    #[cfg(windows)]
+    #[test]
+    fn migration_path_relocation_handles_windows_casing_without_matching_neighbor_directories() {
+        let source = std::path::Path::new("C:/Data");
+        let target = std::path::Path::new("D:/Moved");
+        assert_eq!(
+            super::relocated_live_path("c:/DATA/projects/p", source, target),
+            Some(target.join("projects/p"))
+        );
+        assert!(super::relocated_live_path("C:/Data-other/projects/p", source, target).is_none());
     }
 }

@@ -31,6 +31,11 @@
     "windows": {
       "wix": {
         "version": "2.1.0"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false
       }
     },
     "icon": [

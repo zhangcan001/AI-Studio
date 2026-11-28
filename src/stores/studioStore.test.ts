@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { storyboardDraftKeys, useStudioStore } from "./studioStore";
+import { storyboardDraftKeys, studioHasUnsavedDraft, useStudioStore } from "./studioStore";
 import type { RecipeViewModel } from "../types/generation";
 
 const mediaWorkflow: RecipeViewModel = {
@@ -85,4 +85,17 @@ it("M2-2 snapshots typed provenance and never restores it from equal manual text
  expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined();
  store.applyCreationPrompt({promptId:"p",promptVersionId:"v",text:"exact"}); store.removeValue("prompt");
  expect(useStudioStore.getState().creationPromptProvenance).toBeUndefined(); store.resetDraft();
+});
+
+it("native close protection observes unsaved row prompts and fields independently of the creation draft", () => {
+  useStudioStore.setState({draftDirty:false, storyboardPrompts:{}, storyboardFields:{}});
+  const key = JSON.stringify(["p","row","recipe"]);
+  useStudioStore.getState().setStoryboardPrompt(key, "unsaved row");
+  expect(useStudioStore.getState().draftDirty).toBe(false);
+  expect(studioHasUnsavedDraft(useStudioStore.getState())).toBe(true);
+  useStudioStore.getState().setStoryboardPrompt(key, undefined);
+  useStudioStore.getState().setStoryboardField(key,"duration","8");
+  expect(studioHasUnsavedDraft(useStudioStore.getState())).toBe(true);
+  useStudioStore.getState().setStoryboardField(key,"duration",undefined);
+  expect(studioHasUnsavedDraft(useStudioStore.getState())).toBe(false);
 });

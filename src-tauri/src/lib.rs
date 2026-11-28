@@ -226,7 +226,9 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let logs_dir = default_logs_dir();
     let logging_status = initialize_logging();
+    install_panic_hook(logs_dir.clone());
     tracing::info!("application starting");
 
     if let Err(error) = run_application(logging_status) {
@@ -234,6 +236,35 @@ pub fn run() {
         eprintln!("AI Studio failed to start ({})", error.code());
         std::process::exit(1);
     }
+}
+
+fn install_panic_hook(logs_dir: Option<PathBuf>) {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let message = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            (*s).to_owned()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unexpected internal panic".to_owned()
+        };
+        let location = info
+            .location()
+            .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
+            .unwrap_or_else(|| "unknown".to_owned());
+        tracing::error!(location = %location, panic_message = %message, "unhandled panic");
+        if let Some(dir) = logs_dir.as_deref() {
+            let _ = std::fs::create_dir_all(dir);
+            let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+            let crash_file = dir.join(format!("crash-{stamp}.log"));
+            let report = format!(
+                "AI Studio Crash Report\nUTC: {}\nLocation: {location}\nMessage: {message}\n",
+                chrono::Utc::now().to_rfc3339()
+            );
+            let _ = std::fs::write(&crash_file, report);
+        }
+        default_hook(info);
+    }));
 }
 
 fn initialize_logging() -> LoggingStatus {
@@ -337,7 +368,15 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 .map_err(|_| AppError::initialization("failed to resolve local data directory"))?
                 .join("AIStudio")
                 .join("AIStudioData");
-            let data_root = resolve_data_root(default_data_root);
+            let data_root = resolve_data_root(default_data_root.clone());
+            let data_root = match tauri::async_runtime::block_on(infrastructure::filesystem::complete_pending_data_root_migration(&data_root)) {
+                Ok(root) => root,
+                Err(error) => {
+                    tracing::warn!(error_code = error.code(), "data migration did not complete; original data retained");
+                    app.dialog().message("数据迁移未完成，已继续使用原数据目录。请检查目标目录和磁盘空间后重新安排迁移。").title("数据迁移未完成").blocking_show();
+                    data_root
+                }
+            };
 
             let data_dirs = AppDataDirs::initialize(data_root)?;
             tracing::info!("application data directory initialized");
@@ -598,7 +637,9 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             let comfy_config = match ComfyConnectionConfig::from_endpoint(
                 &loaded_settings.settings.comfy.endpoint,
             ) {
-                Ok(config) => config,
+                Ok(config) => config
+                    .with_auth_header(loaded_settings.settings.comfy.auth_header.clone())
+                    .with_system_proxy(loaded_settings.settings.comfy.allow_system_proxy),
                 Err(_error) => {
                     tracing::warn!(
                         error_type = "invalid_persisted_endpoint",
@@ -803,11 +844,16 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 clock.clone(),
             ).with_new_generation_admission(workflow_registry_service.clone())
             .with_task_cancellation(task_cancellation_service.clone()));
-            let production_start_admission_service = Arc::new(ProductionStartAdmissionService::new(
-                production_queue_service.clone(),
-                comfy_service.clone(),
-                workflow_lifecycle_service.clone(),
-            ));
+            let production_start_admission_service = Arc::new(
+                ProductionStartAdmissionService::new(
+                    production_queue_service.clone(),
+                    comfy_service.clone(),
+                    workflow_lifecycle_service.clone(),
+                )
+                .with_data_root(data_dirs.root.clone()),
+            );
+            let retry_admission: Arc<dyn application::production_queue_service::ProductionRetryAdmission> = production_start_admission_service.clone();
+            production_queue_service.set_retry_admission(Arc::downgrade(&retry_admission));
             let artifact_service = Arc::new(ArtifactService::new(
                 artifact_repository,
                 project_repository.clone(),
@@ -883,6 +929,13 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 production_queue_service.clone(),
                 adapter_factory,
             ));
+            {
+                let pref_settings = settings_service.clone();
+                production_queue_service.set_desktop_preferences_hook(
+                    comfy_adapter.clone(),
+                    Arc::new(move || pref_settings.desktop_preferences()),
+                );
+            }
             let comfy_preflight_service = Arc::new(ComfyPreflightService::new(
                 comfy_service.clone(),
                 diagnostics_service.clone(),
@@ -1139,14 +1192,23 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                 },
                 SystemServices {
                     data_dirs,
+                    default_data_root: Arc::new(default_data_root),
+                    unsaved_draft: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     comfy: comfy_service,
                     comfy_memory: comfy_memory_service,
                     comfy_preflight: comfy_preflight_service,
                     diagnostics: diagnostics_service,
-                    settings: settings_service,
+                    settings: settings_service.clone(),
                     repair_jobs: repair_job_runner.clone(),
                 },
             ));
+
+            if let (Some(main_window), Some(saved_geometry)) = (
+                app.get_webview_window("main"),
+                settings_service.window_state(),
+            ) {
+                restore_window_geometry(&main_window, &saved_geometry);
+            }
 
             tauri::async_runtime::spawn(async move {
                 // Recipe repairs publish new immutable recipe versions; they run
@@ -1202,11 +1264,39 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
 
                 let window = window.clone();
                 let app_handle = window.app_handle().clone();
-                let diagnostics_service: Option<Arc<DiagnosticsService>> = app_handle
-                    .try_state::<AppState>()
-                    .map(|state| Arc::clone(&state.system.diagnostics));
+                let state_handles = app_handle.try_state::<AppState>().map(|state| {
+                    (
+                        Arc::clone(&state.system.diagnostics),
+                        Arc::clone(&state.system.settings),
+                        state
+                            .system
+                            .unsaved_draft
+                            .load(std::sync::atomic::Ordering::SeqCst),
+                    )
+                });
+                let previous_geometry = state_handles
+                    .as_ref()
+                    .and_then(|(_, settings, _)| settings.window_state());
+                let snapshot_geometry =
+                    capture_window_geometry(&window, previous_geometry.as_ref());
 
                 tauri::async_runtime::spawn(async move {
+                    let (diagnostics_service, settings_service, has_unsaved_draft) =
+                        match state_handles {
+                            Some((diag, settings, dirty)) => (Some(diag), Some(settings), dirty),
+                            None => (None, None, false),
+                        };
+                    let persist_and_close = move |win: tauri::Window,
+                                                  settings: Option<Arc<SettingsService>>,
+                                                  geom: Option<application::ports::WindowGeometry>| {
+                        tauri::async_runtime::spawn(async move {
+                            if let (Some(settings), Some(geom)) = (settings, geom) {
+                                let _ = settings.save_window_state(geom).await;
+                            }
+                            let _ = win.destroy();
+                        });
+                    };
+
                     let activity = match diagnostics_service {
                         Some(service) => tokio::time::timeout(
                             std::time::Duration::from_secs(2),
@@ -1219,6 +1309,8 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     };
 
                     let Some(activity) = activity else {
+                        let settings_clone = settings_service.clone();
+                        let geom_clone = snapshot_geometry.clone();
                         app_handle
                             .dialog()
                             .message(
@@ -1233,7 +1325,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                             .show(move |confirmed| {
                                 if confirmed {
                                     tracing::info!("safe exit confirmed");
-                                    let _ = window.destroy();
+                                    persist_and_close(window, settings_clone, geom_clone);
                                 } else {
                                     tracing::info!("safe exit cancelled");
                                 }
@@ -1242,15 +1334,31 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                     };
 
                     if activity.active_task_count == 0 && !activity.production_busy {
-                        app_handle.dialog()
-                            .message("退出会丢弃尚未保存的输入。请确认已保存需要保留的内容。")
+                        if !has_unsaved_draft {
+                            persist_and_close(window, settings_service, snapshot_geometry);
+                            return;
+                        }
+                        let settings_clone = settings_service.clone();
+                        let geom_clone = snapshot_geometry.clone();
+                        app_handle
+                            .dialog()
+                            .message("当前有尚未保存的编辑内容。退出会丢弃这些修改，是否仍要退出？")
                             .title("确认退出")
-                            .buttons(MessageDialogButtons::OkCancelCustom("退出应用".to_owned(), "返回保存".to_owned()))
+                            .buttons(MessageDialogButtons::OkCancelCustom(
+                                "放弃并退出".to_owned(),
+                                "返回保存".to_owned(),
+                            ))
                             .parent(&window)
-                            .show(move |confirmed| { if confirmed { let _ = window.destroy(); } });
+                            .show(move |confirmed| {
+                                if confirmed {
+                                    persist_and_close(window, settings_clone, geom_clone);
+                                }
+                            });
                         return;
                     }
 
+                    let settings_clone = settings_service.clone();
+                    let geom_clone = snapshot_geometry.clone();
                     app_handle
                         .dialog()
                         .message(
@@ -1265,7 +1373,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
                         .show(move |confirmed| {
                             if confirmed {
                                 tracing::info!("safe exit confirmed");
-                                let _ = window.destroy();
+                                persist_and_close(window, settings_clone, geom_clone);
                             } else {
                                 tracing::info!("safe exit cancelled");
                             }
@@ -1348,12 +1456,22 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::settings::production_queue_name_preset_delete,
             commands::settings::workspace_resume_get,
             commands::settings::workspace_resume_save,
+            commands::settings::desktop_preferences_get,
+            commands::settings::desktop_preferences_save,
+            commands::settings::app_set_unsaved_draft,
+            commands::settings::storage_summary_get,
+            commands::settings::storage_data_root_pick_and_set,
+            commands::settings::storage_data_root_reset,
+            commands::settings::storage_open_directory,
+            commands::settings::storage_wal_checkpoint,
+            commands::settings::storage_cleanup_rejected_videos,
             commands::batch_workflow_preset::batch_workflow_presets_list,
             commands::batch_workflow_preset::batch_workflow_preset_create,
             commands::batch_workflow_preset::batch_workflow_preset_update,
             commands::batch_workflow_preset::batch_workflow_preset_delete,
             commands::workflow_library::workflow_library_refresh,
             commands::workflow_onboarding::workflow_onboarding_pick_api_workflow,
+            commands::workflow_onboarding::workflow_onboarding_import_path,
             commands::workflow_onboarding::workflow_onboarding_auto_import_api_workflow,
             commands::workflow_onboarding::workflow_onboarding_auto_confirm,
             commands::workflow_onboarding::workflow_onboarding_regenerate_recipe,
@@ -1420,6 +1538,7 @@ fn run_application(logging_status: LoggingStatus) -> Result<(), AppError> {
             commands::generation::workflow_execution_create_batch,
             commands::generation::generation_create_batch,
             commands::folder_batch_import::folder_batch_import_pick,
+            commands::folder_batch_import::folder_batch_import_pick_path,
             commands::folder_batch_import::folder_batch_import_rescan,
             commands::folder_batch_import::folder_batch_import_discard,
             commands::folder_batch_import::folder_batch_import_commit,
@@ -1702,5 +1821,67 @@ fn hex_value(value: u8) -> Option<u8> {
         b'a'..=b'f' => Some(value - b'a' + 10),
         b'A'..=b'F' => Some(value - b'A' + 10),
         _ => None,
+    }
+}
+
+fn capture_window_geometry(
+    window: &tauri::Window,
+    previous: Option<&application::ports::WindowGeometry>,
+) -> Option<application::ports::WindowGeometry> {
+    if window.is_minimized().unwrap_or(false) {
+        return None;
+    }
+    let maximized = window.is_maximized().unwrap_or(false);
+    if maximized {
+        return Some(application::ports::WindowGeometry {
+            x: previous.map(|g| g.x).unwrap_or(100),
+            y: previous.map(|g| g.y).unwrap_or(80),
+            width: previous.map(|g| g.width).unwrap_or(1280),
+            height: previous.map(|g| g.height).unwrap_or(800),
+            maximized: true,
+        });
+    }
+    let size = window.inner_size().ok()?;
+    let position = window.outer_position().ok()?;
+    if size.width < 800 || size.height < 500 {
+        return None;
+    }
+    Some(application::ports::WindowGeometry {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+        maximized: false,
+    })
+}
+
+fn restore_window_geometry(
+    window: &tauri::WebviewWindow,
+    saved: &application::ports::WindowGeometry,
+) {
+    let width = saved.width.clamp(1000, 7680);
+    let height = saved.height.clamp(700, 4320);
+    let _ = window.set_size(tauri::PhysicalSize::new(width, height));
+    let visible_on_monitor = window
+        .available_monitors()
+        .ok()
+        .map(|monitors| {
+            monitors.iter().any(|monitor| {
+                let pos = monitor.position();
+                let sz = monitor.size();
+                let right = pos.x.saturating_add(sz.width as i32);
+                let bottom = pos.y.saturating_add(sz.height as i32);
+                saved.x >= pos.x.saturating_sub(80)
+                    && saved.x < right.saturating_sub(120)
+                    && saved.y >= pos.y.saturating_sub(40)
+                    && saved.y < bottom.saturating_sub(120)
+            })
+        })
+        .unwrap_or(false);
+    if visible_on_monitor {
+        let _ = window.set_position(tauri::PhysicalPosition::new(saved.x, saved.y));
+    }
+    if saved.maximized {
+        let _ = window.maximize();
     }
 }

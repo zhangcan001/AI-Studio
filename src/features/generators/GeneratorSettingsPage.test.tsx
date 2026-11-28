@@ -1,14 +1,20 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { GeneratorSettingsPage } from "./GeneratorSettingsPage";
 import { GENERATOR_BINDINGS_CHANGED, LAST_GENERATOR_SESSION_KEY, type GeneratorBindingSummary, type GeneratorOption } from "../../product/types";
 const api = vi.hoisted(() => ({ overview: vi.fn(), list: vi.fn(), set: vi.fn() }));
 vi.mock("../../product/client", () => ({ productClient: { project: { getOverview: api.overview, generatorBindingSet: api.set }, creation: { generatorsList: api.list } } }));
+const native = vi.hoisted(() => ({ listen: vi.fn(), query: vi.fn(), toggle: vi.fn(), importPath: vi.fn() }));
+vi.mock("@tauri-apps/api/webview", () => ({getCurrentWebview: () => ({onDragDropEvent: native.listen})}));
+vi.mock("../../services/workflowClient", () => ({
+ queryWorkflowWorkspace:native.query, setWorkflowEnabled:native.toggle, importWorkflowFromPath:native.importPath,
+ commitWorkflowImport:vi.fn(),discardOnboarding:vi.fn(),pickApiWorkflow:vi.fn(),reanalyzeWorkflowImport:vi.fn(),removeWorkflow:vi.fn(),restoreWorkflow:vi.fn(),setOnboardingInputMapping:vi.fn(),setOnboardingMetadata:vi.fn(),setOnboardingOutputMapping:vi.fn(),
+}));
 const options: GeneratorOption[] = ["one", "two"].map(selectionRef => ({ selectionRef, name: "wfl_krea2_fixture.json", version: "2", mode: "T2V", mediaKind: "video", availability: true, availabilityReason: null, recommended: true, fields: [{ type: "textarea", key: "prompt", label: "Prompt", required: true, default: "" }] }));
 let bindings: GeneratorBindingSummary[];
 beforeEach(() => { vi.clearAllMocks(); bindings = [{ stage: "VIDEO", mode: "DEFAULT", selectionRef: "one", bindingInstanceId: "instance-A", revision: 3 }]; api.overview.mockImplementation(async () => ({ generatorBindings: bindings })); api.list.mockImplementation(async (_project, stage) => stage === "video" ? options : []); api.set.mockResolvedValue([]); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); Reflect.deleteProperty(window, "__TAURI_INTERNALS__"); });
 it("phase6_target1 friendly normal projection hides raw identities and requirements use semantic labels", async () => {
   render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()} />);
   await screen.findByText("输入要求：提示词");
@@ -279,4 +285,26 @@ it("reports unsaved dirty state via onDirtyChange and clears it after saving", a
 
   fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
   await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
+});
+
+it("uses the exact current version and recipe for lifecycle status and action", async () => {
+ Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});
+ native.listen.mockResolvedValue(()=>{});
+ native.query.mockResolvedValue({items:[{registry:{workflowId:"w",name:"Multi-version custom",sourceKind:"USER",currentVersionId:"v2",currentRecipe:{recipeId:"r2"}},runtime:[{workflowVersionId:"v1",recipeId:"r1",enabled:false},{workflowVersionId:"v2",recipeId:"r-old",enabled:false},{workflowVersionId:"v2",recipeId:"r2",enabled:true}]}]});
+ native.toggle.mockResolvedValue(undefined);
+ render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()}/>);
+ await screen.findByText("Multi-version custom");
+ fireEvent.click(screen.getByRole("button",{name:/^停用$/}));
+ await waitFor(()=>expect(native.toggle).toHaveBeenCalledWith("v2",false));
+});
+it("serializes native drops while a workflow import is still unresolved", async () => {
+ Object.defineProperty(window,"__TAURI_INTERNALS__",{value:{},configurable:true});
+ native.listen.mockResolvedValue(()=>{}); native.query.mockResolvedValue({items:[]});
+ native.importPath.mockImplementation(()=>new Promise(()=>{}));
+ render(<GeneratorSettingsPage projectId="p" navigate={vi.fn()}/>);
+ await waitFor(()=>expect(native.listen).toHaveBeenCalledTimes(1));
+ const callback=native.listen.mock.calls[0][0];
+ await act(async()=>{callback({payload:{type:"drop",paths:["C:/one.json"]}});});
+ await act(async()=>{callback({payload:{type:"drop",paths:["C:/two.json"]}});});
+ expect(native.importPath).toHaveBeenCalledTimes(1);
 });
